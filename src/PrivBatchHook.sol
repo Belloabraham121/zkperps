@@ -118,15 +118,12 @@ contract PrivBatchHook is BaseHook, IUnlockCallback {
     uint256 public constant MIN_COMMITMENTS = 2;
     uint256 public constant BATCH_INTERVAL = 5 minutes;
 
-    // Optional: Gelato/Chainlink automation address
-    address public immutable automationExecutor;
+    // Note: Automation removed - batch execution is permissionless
+    // Anyone can call revealAndBatchExecute when conditions are met
 
     // ============ Constructor ============
-    constructor(
-        IPoolManager _poolManager,
-        address _automationExecutor
-    ) BaseHook(_poolManager) {
-        automationExecutor = _automationExecutor;
+    constructor(IPoolManager _poolManager) BaseHook(_poolManager) {
+        // No automation executor needed - execution is permissionless
     }
 
     // ============ Hook Permissions ============
@@ -181,10 +178,12 @@ contract PrivBatchHook is BaseHook, IUnlockCallback {
     }
 
     /**
-     * @notice Check if batch execution conditions are met (for automation)
+     * @notice Check if batch execution conditions are met
      * @param poolId The pool ID to check
      * @return canExec Whether execution can proceed
-     * @return execPayload Encoded payload for execution
+     * @return execPayload Empty - not used (execution is permissionless)
+     * @dev Anyone can call revealAndBatchExecute when conditions are met
+     *      This function is useful for off-chain monitoring
      */
     function checker(
         PoolId poolId
@@ -204,14 +203,7 @@ contract PrivBatchHook is BaseHook, IUnlockCallback {
             BATCH_INTERVAL;
 
         canExec = hasEnoughCommitments && intervalElapsed;
-
-        if (canExec) {
-            // In production, this would encode the actual call
-            execPayload = abi.encodeWithSelector(
-                this.revealAndBatchExecute.selector,
-                poolId
-            );
-        }
+        execPayload = ""; // Not used - execution is permissionless
     }
 
     /**

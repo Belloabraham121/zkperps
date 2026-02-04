@@ -29,7 +29,6 @@ contract PrivBatchHookTest is Test {
     address user1 = address(0x1111);
     address user2 = address(0x2222);
     address user3 = address(0x3333);
-    address automationExecutor = address(0xAAAA);
 
     uint256 constant INITIAL_BALANCE = 1000000e18;
     uint256 constant INITIAL_LIQUIDITY = 1000000e18;
@@ -75,10 +74,10 @@ contract PrivBatchHookTest is Test {
             address(this),
             flags,
             type(PrivBatchHook).creationCode,
-            abi.encode(poolManager, automationExecutor)
+            abi.encode(poolManager)
         );
 
-        hook = new PrivBatchHook{salt: salt}(poolManager, automationExecutor);
+        hook = new PrivBatchHook{salt: salt}(poolManager);
         require(address(hook) == hookAddress, "Hook address mismatch");
 
         // Setup pool key (currencies must be sorted)
@@ -242,7 +241,8 @@ contract PrivBatchHookTest is Test {
 
         (bool canExec, bytes memory payload) = hook.checker(poolId);
         assertTrue(canExec);
-        assertGt(payload.length, 0);
+        // Payload is empty for permissionless execution (not used)
+        assertEq(payload.length, 0);
     }
 
     // Test invalid commitment handling
