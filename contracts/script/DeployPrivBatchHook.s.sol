@@ -17,21 +17,28 @@ contract DeployPrivBatchHook is Script {
     
     // Base Sepolia PoolManager address
     address constant POOLMANAGER = 0x05E73354cFDd6745C338b50BcFDfA3Aa6fA03408;
+    
+    // Base Sepolia deployed verifier address (from previous deployment)
+    address constant DEPLOYED_VERIFIER = 0x09F3bCe3546C3b4348E31B6E86A271c42b39672e;
 
     function run() external {
         uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
         address deployer = vm.addr(deployerPrivateKey);
 
-        console.log("Deploying ZK Verifier and PrivBatchHook...");
+        console.log("Deploying PrivBatchHook...");
         console.log("Deployer:", deployer);
         console.log("PoolManager:", POOLMANAGER);
 
         vm.startBroadcast(deployerPrivateKey);
 
-        // Step 1: Deploy the ZK Verifier contract
-        console.log("\n=== Deploying Groth16Verifier ===");
-        Groth16Verifier verifier = new Groth16Verifier();
-        console.log("Groth16Verifier deployed at:", address(verifier));
+        // Step 1: Use existing deployed verifier address
+        // The verifier is already deployed, we just pass its address to the hook
+        address verifierAddress = DEPLOYED_VERIFIER;
+        Groth16Verifier verifier = Groth16Verifier(verifierAddress);
+        
+        console.log("\n=== Using Deployed Verifier ===");
+        console.log("Verifier address:", verifierAddress);
+        console.log("Note: Verifier is NOT being redeployed - using existing address");
 
         // Step 2: Mine for hook address with correct flags
         // We need beforeSwap and afterSwap flags
@@ -48,7 +55,7 @@ contract DeployPrivBatchHook is Script {
             CREATE2_DEPLOYER,
             flags,
             type(PrivBatchHook).creationCode,
-            abi.encode(IPoolManager(POOLMANAGER), address(verifier))
+            abi.encode(IPoolManager(POOLMANAGER), verifierAddress)
         );
 
         console.log("\n=== Mining Hook Address ===");
@@ -66,8 +73,8 @@ contract DeployPrivBatchHook is Script {
 
         console.log("PrivBatchHook deployed at:", address(hook));
         console.log("\n=== Deployment Summary ===");
-        console.log("Verifier:", address(verifier));
-        console.log("Hook:", address(hook));
+        console.log("Verifier (existing):", verifierAddress);
+        console.log("Hook (new):", address(hook));
 
         vm.stopBroadcast();
     }

@@ -6,12 +6,15 @@
   "scripts": {
     "generate-proof": "node generate-proof.js",
     "verify-proof": "node verify-proof.js",
-    "test": "node test-proof-generation.js"
+    "test": "node test-proof-generation.js",
+    "test-e2e": "node test-end-to-end-zk-flow.js"
   },
   "dependencies": {
-    "snarkjs": "^0.7.0",
+    "@ethersproject/signing-key": "^5.7.0",
     "circomlibjs": "^0.1.7",
-    "@ethersproject/signing-key": "^5.7.0"
+    "dotenv": "^16.6.1",
+    "ethers": "^6.16.0",
+    "snarkjs": "^0.7.0"
   },
   "keywords": [
     "zk",
