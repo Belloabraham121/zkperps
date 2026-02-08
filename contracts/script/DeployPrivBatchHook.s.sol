@@ -7,7 +7,7 @@ import {PoolKey} from "v4-core/types/PoolKey.sol";
 import {Currency} from "v4-core/types/Currency.sol";
 import {IHooks} from "v4-core/interfaces/IHooks.sol";
 import {Hooks} from "v4-core/libraries/Hooks.sol";
-import {PrivBatchHook} from "../src/PrivBatchHook.sol";
+import {PrivBatchHook} from "../PrivBatchHook.sol";
 import {HookMiner} from "v4-periphery/src/utils/HookMiner.sol";
 
 contract DeployPrivBatchHook is Script {
