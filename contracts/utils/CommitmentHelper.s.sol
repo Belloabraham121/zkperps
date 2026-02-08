@@ -3,7 +3,7 @@ pragma solidity ^0.8.26;
 
 import "forge-std/Script.sol";
 import {PrivBatchHook} from "../PrivBatchHook.sol";
-import {Currency} from "v4-core/types/Currency.sol";
+import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 
 /**
  * @title CommitmentHelper

@@ -2,20 +2,21 @@
 pragma solidity ^0.8.26;
 
 import {BaseHook} from "v4-periphery/src/utils/BaseHook.sol";
-import {Hooks} from "v4-core/libraries/Hooks.sol";
-import {IPoolManager} from "v4-core/interfaces/IPoolManager.sol";
-import {PoolKey} from "v4-core/types/PoolKey.sol";
-import {PoolId, PoolIdLibrary} from "v4-core/types/PoolId.sol";
-import {BalanceDelta} from "v4-core/types/BalanceDelta.sol";
+import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
+import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
+import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
+import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
+import {BalanceDelta} from "@uniswap/v4-core/src/types/BalanceDelta.sol";
 import {
     BeforeSwapDelta,
     BeforeSwapDeltaLibrary
-} from "v4-core/types/BeforeSwapDelta.sol";
-import {Currency, CurrencyLibrary} from "v4-core/types/Currency.sol";
-import {StateLibrary} from "v4-core/libraries/StateLibrary.sol";
+} from "@uniswap/v4-core/src/types/BeforeSwapDelta.sol";
+import {Currency, CurrencyLibrary} from "@uniswap/v4-core/src/types/Currency.sol";
+import {SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
+import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {IERC20} from "forge-std/interfaces/IERC20.sol";
-import {IUnlockCallback} from "v4-core/interfaces/callback/IUnlockCallback.sol";
-import {TransientStateLibrary} from "v4-core/libraries/TransientStateLibrary.sol";
+import {IUnlockCallback} from "@uniswap/v4-core/src/interfaces/callback/IUnlockCallback.sol";
+import {TransientStateLibrary} from "@uniswap/v4-core/src/libraries/TransientStateLibrary.sol";
 
 /**
  * @title PrivBatchHook
@@ -410,7 +411,7 @@ contract PrivBatchHook is BaseHook, IUnlockCallback {
         poolManager.settle();
 
         // Execute the swap
-        IPoolManager.SwapParams memory swapParams = IPoolManager.SwapParams({
+        SwapParams memory swapParams = SwapParams({
             zeroForOne: callbackData.zeroForOne,
             amountSpecified: callbackData.zeroForOne ? callbackData.netAmount0 : callbackData.netAmount1,
             sqrtPriceLimitX96: callbackData.sqrtPriceLimitX96
@@ -666,7 +667,7 @@ contract PrivBatchHook is BaseHook, IUnlockCallback {
     function _beforeSwap(
         address,
         PoolKey calldata,
-        IPoolManager.SwapParams calldata,
+        SwapParams calldata,
         bytes calldata
     ) internal pure override returns (bytes4, BeforeSwapDelta, uint24) {
         // Optional: Block direct swaps to force batch-only mode
@@ -681,7 +682,7 @@ contract PrivBatchHook is BaseHook, IUnlockCallback {
     function _afterSwap(
         address,
         PoolKey calldata,
-        IPoolManager.SwapParams calldata,
+        SwapParams calldata,
         BalanceDelta,
         bytes calldata
     ) internal pure override returns (bytes4, int128) {

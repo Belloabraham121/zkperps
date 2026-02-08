@@ -20,6 +20,12 @@
     "noImplicitReturns": true,
     "noFallthroughCasesInSwitch": true
   },
+  "ts-node": {
+    "esm": false,
+    "compilerOptions": {
+      "module": "commonjs"
+    }
+  },
   "include": [
     "**/*.ts"
   ],
