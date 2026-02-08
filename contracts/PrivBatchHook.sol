@@ -653,10 +653,12 @@ contract PrivBatchHook is BaseHook, IUnlockCallback {
                 netDelta0 -= int256(intent.minAmountOut);
             }
 
-            // Transfer tokens
+            // Transfer tokens from user to hook (NOT directly to poolManager)
+            // The hook will transfer the net amount to poolManager inside the unlock callback
+            // This is necessary because tokens transferred before unlock() aren't seen by sync()/settle()
             IERC20(tokenInAddress).transferFrom(
                 intent.user,
-                address(poolManager),
+                address(this),
                 intent.amountIn
             );
         }
@@ -788,19 +790,15 @@ contract PrivBatchHook is BaseHook, IUnlockCallback {
             ? callbackData.key.currency1
             : callbackData.key.currency0;
 
-        // Input tokens were already transferred directly to PoolManager in _processReveals
-        // Now we just need to sync and settle
-        // Sync input currency to checkpoint the balance in PoolManager
-        poolManager.sync(inputCurrency);
+        // Step 1: Execute the swap (creates debts/credits in the PoolManager)
+        // Use negative amountSpecified for exact-input swap
+        int256 netInput = callbackData.zeroForOne
+            ? callbackData.netAmount0
+            : callbackData.netAmount1;
 
-        // Settle input tokens (pay to pool)
-        // settle() will use the tokens that were transferred to PoolManager
-        poolManager.settle();
-
-        // Execute the swap
         SwapParams memory swapParams = SwapParams({
             zeroForOne: callbackData.zeroForOne,
-            amountSpecified: callbackData.zeroForOne ? callbackData.netAmount0 : callbackData.netAmount1,
+            amountSpecified: -netInput, // Negative = exact input in V4
             sqrtPriceLimitX96: callbackData.sqrtPriceLimitX96
         });
 
@@ -810,16 +808,27 @@ contract PrivBatchHook is BaseHook, IUnlockCallback {
             ""
         );
 
-        // Take output tokens (receive from pool)
-        // Note: We take to hook first, then distribute to recipients
-        // This is necessary because we need to calculate proportional shares
-        // Future optimization: could take directly to recipients if we pre-calculate shares
-        int256 outputDelta = callbackData.zeroForOne
+        // Step 2: Settle input — pay what we owe to the pool
+        // The swap created a negative delta for the input currency (we owe tokens)
+        // sync() snapshots current balance, then we transfer, then settle() credits the difference
+        int128 inputDelta = callbackData.zeroForOne
+            ? swapDelta.amount0()
+            : swapDelta.amount1();
+
+        if (inputDelta < 0) {
+            uint256 amountToPay = uint256(uint128(-inputDelta));
+            poolManager.sync(inputCurrency);
+            IERC20(Currency.unwrap(inputCurrency)).transfer(address(poolManager), amountToPay);
+            poolManager.settle();
+        }
+
+        // Step 3: Take output — receive what we're owed from the pool
+        int128 outputDelta = callbackData.zeroForOne
             ? swapDelta.amount1()
             : swapDelta.amount0();
 
         if (outputDelta > 0) {
-            poolManager.take(outputCurrency, address(this), uint256(outputDelta));
+            poolManager.take(outputCurrency, address(this), uint256(uint128(outputDelta)));
         }
 
         return abi.encode(swapDelta);

@@ -60,10 +60,11 @@ try {
 const WASM_PATH = path.join(__dirname, '../../build/zk/commitment-proof_js/commitment-proof.wasm');
 const ZKEY_PATH = path.join(__dirname, '../../build/zk/final.zkey');
 
-// Base Sepolia addresses
-const USDC_ADDRESS = '0x036CbD53842c5426634e7929541eC2318f3dCF7e'; // USDC on Base Sepolia
-// USDT address - use from env or default to the mock USDT we deployed
-const USDT_ADDRESS = process.env.MOCK_USDT_ADDRESS || process.env.USDT_ADDRESS || '0x0Ea67A670a4182Db6eB18A6aAbC0f75195ef2EfC'; // Mock USDT on Base Sepolia
+// Base Sepolia mock token addresses
+// IMPORTANT: In Uniswap V4, currency0 < currency1
+// USDT (0x0Ea...) < USDC (0x983...) so: currency0 = USDT, currency1 = USDC
+const USDT_ADDRESS = process.env.MOCK_USDT_ADDRESS || '0x0Ea67A670a4182Db6eB18A6aAbC0f75195ef2EfC'; // MockUSDT (18 decimals)
+const USDC_ADDRESS = process.env.MOCK_USDC_ADDRESS || '0x98346718c549Ed525201fC583796eCf2eaCC0aD5'; // MockUSDC (6 decimals)
 
 // Load ABI
 const PRIV_BATCH_HOOK_ABI = [
@@ -299,10 +300,11 @@ async function testEndToEndZKFlow() {
     console.log('\n📤 Step 3: Submitting commitments with proofs on-chain');
     console.log('-'.repeat(60));
 
-    // Create pool key (you'll need to adjust this based on your actual pool)
+    // Create pool key — currency0 must be < currency1
+    // USDT (0x0Ea...) < USDC (0x983...) so currency0 = USDT, currency1 = USDC
     const poolKey = {
-        currency0: USDC_ADDRESS,
-        currency1: USDT_ADDRESS,
+        currency0: USDT_ADDRESS,
+        currency1: USDC_ADDRESS,
         fee: 3000,
         tickSpacing: 60,
         hooks: hookAddress
@@ -342,10 +344,15 @@ async function testEndToEndZKFlow() {
 
             console.log(`   Transaction: ${tx.hash}`);
             const receipt = await tx.wait();
-            console.log(`   ✅ Confirmed in block ${receipt.blockNumber}`);
+            if (receipt.status === 0) {
+                console.log(`   ❌ Transaction REVERTED in block ${receipt.blockNumber}`);
+                continue;
+            }
+            console.log(`   ✅ Confirmed in block ${receipt.blockNumber} (status: ${receipt.status})`);
 
             // Verify commitment is marked as verified
             const isVerified = await hook.verifiedCommitments(commitmentHash);
+            console.log(`   🔍 Query verifiedCommitments(${commitmentHash}) = ${isVerified}`);
             if (isVerified) {
                 console.log(`   ✅ Commitment verified on-chain`);
             } else {
@@ -491,6 +498,25 @@ async function testEndToEndZKFlow() {
         const approveTx2 = await usdt.approve(hookAddress, usdtApprovalAmount);
         await approveTx2.wait();
         console.log(`   ✅ Approved hook for ${usdtApprovalAmount} USDT units`);
+        // Verify allowances are set correctly
+        const usdcAllowance = await usdc.allowance(signer.address, hookAddress);
+        const usdtAllowance = await usdt.allowance(signer.address, hookAddress);
+        console.log(`   USDC allowance for hook: ${usdcAllowance}`);
+        console.log(`   USDT allowance for hook: ${usdtAllowance}`);
+
+        // Also check if a test transferFrom would work (simulate)
+        try {
+            await usdt.transferFrom.staticCall(signer.address, hookAddress, '1000000');
+            console.log(`   ✅ USDT transferFrom simulation passed`);
+        } catch (e) {
+            console.log(`   ❌ USDT transferFrom simulation FAILED: ${e.message}`);
+        }
+        try {
+            await usdc.transferFrom.staticCall(signer.address, hookAddress, '500000');
+            console.log(`   ✅ USDC transferFrom simulation passed`);
+        } catch (e) {
+            console.log(`   ❌ USDC transferFrom simulation FAILED: ${e.message}`);
+        }
     } catch (error) {
         console.error(`   ❌ Approval error: ${error.message}`);
     }

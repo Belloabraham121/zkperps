@@ -43,20 +43,13 @@ contract SetupPoolLiquidity is Script {
     function run() external {
         uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
         address deployer = vm.addr(deployerPrivateKey);
-        
-        // Get USDT address from env or use default
-        address usdtAddress = vm.envOr("MOCK_USDT_ADDRESS", USDT);
-        if (usdtAddress == address(0)) {
-            usdtAddress = vm.envOr("USDT_ADDRESS", address(0));
-        }
-        require(usdtAddress != address(0), "USDT_ADDRESS or MOCK_USDT_ADDRESS must be set");
 
         console.log("Setting up pool and adding liquidity...");
         console.log("Deployer:", deployer);
         console.log("PoolManager:", POOL_MANAGER);
         console.log("PositionManager:", POSITION_MANAGER);
-        console.log("USDC:", USDC);
-        console.log("USDT:", usdtAddress);
+        console.log("Currency0 (USDT):", MOCK_USDT);
+        console.log("Currency1 (USDC):", MOCK_USDC);
         console.log("Hook:", HOOK);
 
         vm.startBroadcast(deployerPrivateKey);
@@ -64,10 +57,11 @@ contract SetupPoolLiquidity is Script {
         IPoolManager poolManager = IPoolManager(POOL_MANAGER);
         IPositionManager positionManager = IPositionManager(POSITION_MANAGER);
         
-        // Create pool key
+        // Create pool key — currency0 must be < currency1
+        // USDT (0x0Ea...) < USDC (0x983...) ✓
         PoolKey memory poolKey = PoolKey({
-            currency0: Currency.wrap(USDC),
-            currency1: Currency.wrap(usdtAddress),
+            currency0: Currency.wrap(MOCK_USDT),
+            currency1: Currency.wrap(MOCK_USDC),
             fee: FEE,
             tickSpacing: TICK_SPACING,
             hooks: IHooks(HOOK)
@@ -89,32 +83,31 @@ contract SetupPoolLiquidity is Script {
 
         // Step 2: Approve tokens via Permit2
         console.log("\n=== Step 2: Approving Tokens via Permit2 ===");
-        IERC20 usdc = IERC20(USDC);
-        IERC20 usdt = IERC20(usdtAddress);
+        IERC20 usdt = IERC20(MOCK_USDT);
+        IERC20 usdc = IERC20(MOCK_USDC);
         IAllowanceTransfer permit2 = IAllowanceTransfer(PERMIT2);
         
         // Check balances
-        uint256 usdcBal = usdc.balanceOf(deployer);
         uint256 usdtBal = usdt.balanceOf(deployer);
-        console.log("USDC balance:", usdcBal);
-        console.log("USDT balance:", usdtBal);
-        require(usdcBal >= AMOUNT0_DESIRED, "Insufficient USDC balance");
-        require(usdtBal >= AMOUNT1_DESIRED, "Insufficient USDT balance");
+        uint256 usdcBal = usdc.balanceOf(deployer);
+        console.log("USDT balance (currency0):", usdtBal);
+        console.log("USDC balance (currency1):", usdcBal);
+        require(usdtBal >= AMOUNT0_DESIRED, "Insufficient USDT balance");
+        require(usdcBal >= AMOUNT1_DESIRED, "Insufficient USDC balance");
 
-        // Step 2a: Always re-approve tokens to Permit2 (ensure sufficient allowance)
-        usdc.approve(PERMIT2, type(uint256).max);
-        console.log("USDC approved to Permit2");
-        
+        // Step 2a: Approve both tokens to Permit2
         usdt.approve(PERMIT2, type(uint256).max);
         console.log("USDT approved to Permit2");
         
-        // Step 2b: Approve PositionManager as spender in Permit2
-        // Always re-approve to ensure sufficient allowance (previous mints may have depleted it)
-        permit2.approve(USDC, POSITION_MANAGER, type(uint160).max, type(uint48).max);
-        console.log("PositionManager approved for USDC in Permit2");
+        usdc.approve(PERMIT2, type(uint256).max);
+        console.log("USDC approved to Permit2");
         
-        permit2.approve(usdtAddress, POSITION_MANAGER, type(uint160).max, type(uint48).max);
+        // Step 2b: Approve PositionManager as spender in Permit2
+        permit2.approve(MOCK_USDT, POSITION_MANAGER, type(uint160).max, type(uint48).max);
         console.log("PositionManager approved for USDT in Permit2");
+        
+        permit2.approve(MOCK_USDC, POSITION_MANAGER, type(uint160).max, type(uint48).max);
+        console.log("PositionManager approved for USDC in Permit2");
 
         // Step 3: Calculate liquidity
         console.log("\n=== Step 3: Calculating Liquidity ===");
@@ -173,8 +166,8 @@ contract SetupPoolLiquidity is Script {
         console.log("\n=== Setup Complete ===");
         console.log("Pool initialized and liquidity added");
         console.log("Pool Key:");
-        console.log("  Currency0:", USDC);
-        console.log("  Currency1:", usdtAddress);
+        console.log("  Currency0 (USDT):", MOCK_USDT);
+        console.log("  Currency1 (USDC):", MOCK_USDC);
         console.log("  Fee:", FEE);
         console.log("  Tick Spacing:", TICK_SPACING);
         console.log("  Hooks:", HOOK);
