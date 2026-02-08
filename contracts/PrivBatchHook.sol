@@ -13,7 +13,6 @@ import {
 } from "v4-core/types/BeforeSwapDelta.sol";
 import {Currency, CurrencyLibrary} from "v4-core/types/Currency.sol";
 import {StateLibrary} from "v4-core/libraries/StateLibrary.sol";
-import {SwapParams} from "v4-core/types/PoolOperation.sol";
 import {IERC20} from "forge-std/interfaces/IERC20.sol";
 import {IUnlockCallback} from "v4-core/interfaces/callback/IUnlockCallback.sol";
 import {TransientStateLibrary} from "v4-core/libraries/TransientStateLibrary.sol";
@@ -42,10 +41,11 @@ contract PrivBatchHook is BaseHook, IUnlockCallback {
     error SlippageExceededForUser(address user, uint256 expected, uint256 actual);
 
     // ============ Events ============
+    // Privacy-enhanced events: Minimize sensitive data exposure
     event CommitmentSubmitted(
         PoolId indexed poolId,
-        bytes32 indexed commitmentHash,
-        address indexed committer
+        bytes32 indexed commitmentHash
+        // Removed: address committer (privacy improvement)
     );
     event BatchExecuted(
         PoolId indexed poolId,
@@ -56,20 +56,21 @@ contract PrivBatchHook is BaseHook, IUnlockCallback {
     );
     event CommitmentRevealed(
         PoolId indexed poolId,
-        bytes32 indexed commitmentHash,
-        address user
+        bytes32 indexed commitmentHash
+        // Removed: address user (privacy improvement)
     );
     event TokensDistributed(
         PoolId indexed poolId,
-        address indexed recipient,
+        bytes32 indexed recipientHash,  // Hash of recipient instead of address
         address token,
         uint256 amount
+        // Removed: address recipient (privacy improvement - use recipientHash instead)
     );
 
     // ============ Structs ============
     struct Commitment {
         bytes32 commitmentHash;
-        address committer;
+        address committer;  // Optional: can be address(0) for anonymous commitments
         uint256 timestamp;
         bool revealed;
     }
@@ -167,14 +168,15 @@ contract PrivBatchHook is BaseHook, IUnlockCallback {
 
         Commitment memory newCommitment = Commitment({
             commitmentHash: _commitmentHash,
-            committer: msg.sender,
+            committer: address(0),  // Anonymous commitment - no address stored
             timestamp: block.timestamp,
             revealed: false
         });
 
         commitments[poolId].push(newCommitment);
 
-        emit CommitmentSubmitted(poolId, _commitmentHash, msg.sender);
+        // Privacy-enhanced: Don't emit committer address
+        emit CommitmentSubmitted(poolId, _commitmentHash);
     }
 
     /**
@@ -305,7 +307,8 @@ contract PrivBatchHook is BaseHook, IUnlockCallback {
                 ) {
                     poolCommitments[j].revealed = true;
                     found = true;
-                    emit CommitmentRevealed(poolId, computedHash, intent.user);
+                    // Privacy-enhanced: Don't emit user address
+                    emit CommitmentRevealed(poolId, computedHash);
                     break;
                 }
             }
@@ -407,7 +410,7 @@ contract PrivBatchHook is BaseHook, IUnlockCallback {
         poolManager.settle();
 
         // Execute the swap
-        SwapParams memory swapParams = SwapParams({
+        IPoolManager.SwapParams memory swapParams = IPoolManager.SwapParams({
             zeroForOne: callbackData.zeroForOne,
             amountSpecified: callbackData.zeroForOne ? callbackData.netAmount0 : callbackData.netAmount1,
             sqrtPriceLimitX96: callbackData.sqrtPriceLimitX96
@@ -601,7 +604,9 @@ contract PrivBatchHook is BaseHook, IUnlockCallback {
                 IERC20(outputToken).transfer(contrib.recipient, share);
                 distributed += share;
                 
-                emit TokensDistributed(poolId, contrib.recipient, outputToken, share);
+                // Privacy-enhanced: Emit hash of recipient instead of address
+                bytes32 recipientHash = keccak256(abi.encodePacked(contrib.recipient));
+                emit TokensDistributed(poolId, recipientHash, outputToken, share);
             }
         }
     }
@@ -661,7 +666,7 @@ contract PrivBatchHook is BaseHook, IUnlockCallback {
     function _beforeSwap(
         address,
         PoolKey calldata,
-        SwapParams calldata,
+        IPoolManager.SwapParams calldata,
         bytes calldata
     ) internal pure override returns (bytes4, BeforeSwapDelta, uint24) {
         // Optional: Block direct swaps to force batch-only mode
@@ -676,7 +681,7 @@ contract PrivBatchHook is BaseHook, IUnlockCallback {
     function _afterSwap(
         address,
         PoolKey calldata,
-        SwapParams calldata,
+        IPoolManager.SwapParams calldata,
         BalanceDelta,
         bytes calldata
     ) internal pure override returns (bytes4, int128) {
