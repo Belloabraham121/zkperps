@@ -45,11 +45,10 @@ try {
 
 // Base Sepolia addresses
 const POOL_MANAGER = '0x05E73354cFDd6745C338b50BcFDfA3Aa6fA03408'; // Base Sepolia PoolManager
+const POSITION_MANAGER = process.env.POSITION_MANAGER_ADDRESS || '0x4b2c77d209d3405f41a037ec6c77f7f5b8e2ca80'; // Base Sepolia PositionManager
 const USDC_ADDRESS = process.env.USDC_ADDRESS || '0x036CbD53842c5426634e7929541eC2318f3dCF7e';
 // MockUSDT address - will be set after deployment or from env
 const USDT_ADDRESS = process.env.USDT_ADDRESS || process.env.MOCK_USDT_ADDRESS;
-// PositionManager address - set in env or use default Base Sepolia address
-const POSITION_MANAGER_ADDRESS = process.env.POSITION_MANAGER_ADDRESS;
 
 // Minimal ABI for PoolManager
 const POOL_MANAGER_ABI = [
@@ -167,13 +166,13 @@ async function setupPoolAndLiquidity() {
     console.log(`     Hooks: ${poolKey[4]}`);
 
     // Calculate initial price (1:1 ratio)
-    const sqrtPriceX96 = calculateSqrtPriceX96(1.0);
-    console.log(`   Initial sqrtPriceX96: ${sqrtPriceX96}`);
+    const initialSqrtPriceX96 = calculateSqrtPriceX96(1.0);
+    console.log(`   Initial sqrtPriceX96: ${initialSqrtPriceX96}`);
 
     try {
         // Initialize pool
         console.log(`\n📤 Initializing pool...`);
-        const initTx = await poolManager.initialize(poolKey, sqrtPriceX96);
+        const initTx = await poolManager.initialize(poolKey, initialSqrtPriceX96);
         console.log(`   Transaction: ${initTx.hash}`);
         const initReceipt = await initTx.wait();
         console.log(`   ✅ Pool initialized in block ${initReceipt.blockNumber}`);
@@ -229,13 +228,7 @@ async function setupPoolAndLiquidity() {
     // Step 3: Add liquidity using PositionManager
     console.log(`\n💧 Step 3: Adding Liquidity`);
     console.log('-'.repeat(60));
-
-    if (!POSITION_MANAGER_ADDRESS) {
-        console.log(`   ⚠️  POSITION_MANAGER_ADDRESS not set in environment`);
-        console.log(`   ⚠️  Set POSITION_MANAGER_ADDRESS in .env with the deployed PositionManager address`);
-        console.log(`   ⚠️  For Base Sepolia, check Uniswap v4 documentation for the deployed address`);
-        return;
-    }
+    console.log(`   Using PositionManager: ${POSITION_MANAGER}`);
 
     // Amount to add: 10 USDC and 10.2 USDT
     const amount0Desired = ethers.parseUnits('10', usdcDecimals); // 10 USDC (6 decimals)
@@ -243,10 +236,10 @@ async function setupPoolAndLiquidity() {
     const amount0Min = amount0Desired * BigInt(95) / BigInt(100); // 5% slippage tolerance
     const amount1Min = amount1Desired * BigInt(95) / BigInt(100); // 5% slippage tolerance
 
-    console.log(`   Adding liquidity:`);
-    console.log(`     USDC: ${ethers.formatUnits(amount0Desired, usdcDecimals)} (min: ${ethers.formatUnits(amount0Min, usdcDecimals)})`);
-    console.log(`     USDT: ${ethers.formatUnits(amount1Desired, usdtDecimals)} (min: ${ethers.formatUnits(amount1Min, usdtDecimals)})`);
-    console.log(`     PositionManager: ${POSITION_MANAGER_ADDRESS}`);
+        console.log(`   Adding liquidity:`);
+        console.log(`     USDC: ${ethers.formatUnits(amount0Desired, usdcDecimals)} (min: ${ethers.formatUnits(amount0Min, usdcDecimals)})`);
+        console.log(`     USDT: ${ethers.formatUnits(amount1Desired, usdtDecimals)} (min: ${ethers.formatUnits(amount1Min, usdtDecimals)})`);
+        console.log(`     PositionManager: ${POSITION_MANAGER}`);
 
     // Check if we have enough balance
     if (usdcBalance < amount0Desired) {
@@ -259,21 +252,21 @@ async function setupPoolAndLiquidity() {
     }
 
     // Approve tokens to PositionManager
-    const positionManager = new ethers.Contract(POSITION_MANAGER_ADDRESS, POSITION_MANAGER_ABI, signer);
+    const positionManager = new ethers.Contract(POSITION_MANAGER, POSITION_MANAGER_ABI, signer);
     
-    const usdcPosmAllowance = await usdc.allowance(signer.address, POSITION_MANAGER_ADDRESS);
-    const usdtPosmAllowance = await usdt.allowance(signer.address, POSITION_MANAGER_ADDRESS);
+    const usdcPosmAllowance = await usdc.allowance(signer.address, POSITION_MANAGER);
+    const usdtPosmAllowance = await usdt.allowance(signer.address, POSITION_MANAGER);
 
     if (usdcPosmAllowance < amount0Desired) {
         console.log(`\n📤 Approving USDC to PositionManager...`);
-        const approveTx = await usdc.approve(POSITION_MANAGER_ADDRESS, approvalAmount);
+        const approveTx = await usdc.approve(POSITION_MANAGER, approvalAmount);
         await approveTx.wait();
         console.log(`   ✅ USDC approved to PositionManager`);
     }
 
     if (usdtPosmAllowance < amount1Desired) {
         console.log(`\n📤 Approving USDT to PositionManager...`);
-        const approveTx = await usdt.approve(POSITION_MANAGER_ADDRESS, approvalAmount);
+        const approveTx = await usdt.approve(POSITION_MANAGER, approvalAmount);
         await approveTx.wait();
         console.log(`   ✅ USDT approved to PositionManager`);
     }
@@ -284,50 +277,120 @@ async function setupPoolAndLiquidity() {
     const tickLower = -60; // One tick spacing below
     const tickUpper = 60;  // One tick spacing above
 
-    // Calculate liquidity amount (simplified - in production use proper Uniswap v4 math)
-    // For now, we'll use a reasonable estimate. The actual liquidity will be calculated by the PositionManager
-    const liquidity = amount0Desired; // Simplified - PositionManager will calculate actual liquidity
+    // Calculate liquidity from amounts
+    // We need the current pool price (sqrtPriceX96) to calculate liquidity properly
+    // For a 1:1 price pool, sqrtPriceX96 = 2^96
+    // Since the pool was initialized with sqrtPriceX96 = 2^96 (1:1), we can use that
+    const Q96 = BigInt(2) ** BigInt(96);
+    const currentSqrtPriceX96 = Q96; // 1:1 price (from initialization)
+    
+    // Calculate sqrt prices at tick boundaries
+    // For tick = 0, sqrtPrice = 2^96
+    // For tick = n, sqrtPrice = 1.0001^n * 2^96
+    // We'll use a simplified calculation for small tick ranges
+    function getSqrtPriceAtTick(tick) {
+        // Simplified: for small ticks, we can approximate
+        // sqrt(1.0001^tick) ≈ 1 + tick * 0.00005 (for small ticks)
+        // But for accuracy, we need: sqrtPrice = sqrt(1.0001^tick) * 2^96
+        // For now, use a rough approximation
+        const tickRatio = 1.0001 ** Number(tick);
+        const sqrtTickRatio = Math.sqrt(tickRatio);
+        return BigInt(Math.floor(Number(Q96) * sqrtTickRatio));
+    }
+    
+    const sqrtPriceAX96 = getSqrtPriceAtTick(tickLower);
+    const sqrtPriceBX96 = getSqrtPriceAtTick(tickUpper);
+    
+    // Calculate liquidity using the formula from LiquidityAmounts
+    // For price in range: liquidity = min(liquidity0, liquidity1)
+    // liquidity0 = amount0 * sqrt(upper) * sqrt(lower) / (sqrt(upper) - sqrt(lower))
+    // liquidity1 = amount1 * Q96 / (sqrt(upper) - sqrt(lower))
+    function calculateLiquidity(priceX96, priceAX96, priceBX96, amount0, amount1) {
+        // Ensure priceAX96 < priceBX96
+        let sqrtA = priceAX96 < priceBX96 ? priceAX96 : priceBX96;
+        let sqrtB = priceAX96 < priceBX96 ? priceBX96 : priceAX96;
+        
+        if (priceX96 <= sqrtA) {
+            // Price below range - only token0
+            const intermediate = (sqrtA * sqrtB) / Q96;
+            return (amount0 * intermediate) / (sqrtB - sqrtA);
+        } else if (priceX96 < sqrtB) {
+            // Price in range - both tokens
+            const liquidity0 = (amount0 * (priceX96 * sqrtB) / Q96) / (sqrtB - priceX96);
+            const liquidity1 = (amount1 * Q96) / (priceX96 - sqrtA);
+            return liquidity0 < liquidity1 ? liquidity0 : liquidity1;
+        } else {
+            // Price above range - only token1
+            return (amount1 * Q96) / (sqrtB - sqrtA);
+        }
+    }
+    
+    const liquidity = calculateLiquidity(currentSqrtPriceX96, sqrtPriceAX96, sqrtPriceBX96, amount0Desired, amount1Desired);
+    
+    // Ensure liquidity fits in uint128
+    const maxUint128 = BigInt(2) ** BigInt(128) - BigInt(1);
+    const finalLiquidity = liquidity > maxUint128 ? maxUint128 : liquidity;
 
     try {
         console.log(`\n📤 Minting liquidity position via PositionManager...`);
         console.log(`   Tick range: [${tickLower}, ${tickUpper}]`);
+        console.log(`   Calculated liquidity: ${finalLiquidity.toString()}`);
         
-        // Use mint function for new position
-        // Note: This is a simplified approach. For production, use modifyLiquidities with proper action encoding
+        // Encode actions: MINT_POSITION + SETTLE_PAIR (for ERC20 tokens)
+        const actions = ethers.solidityPacked(
+            ['uint8', 'uint8'],
+            [Actions.MINT_POSITION, Actions.SETTLE_PAIR]
+        );
+        
+        // MINT_POSITION parameters: (poolKey, tickLower, tickUpper, liquidity, amount0Max, amount1Max, recipient, hookData)
+        const hookData = '0x';
+        const mintParams = ethers.AbiCoder.defaultAbiCoder().encode(
+            [
+                'tuple(address currency0, address currency1, uint24 fee, int24 tickSpacing, address hooks)',
+                'int24',
+                'int24',
+                'uint256',
+                'uint128',
+                'uint128',
+                'address',
+                'bytes'
+            ],
+            [
+                poolKey,
+                tickLower,
+                tickUpper,
+                finalLiquidity,
+                amount0Desired, // amount0Max
+                amount1Desired, // amount1Max
+                signer.address, // recipient
+                hookData
+            ]
+        );
+
+        // SETTLE_PAIR parameters: (currency0, currency1)
+        const settleParams = ethers.AbiCoder.defaultAbiCoder().encode(
+            ['address', 'address'],
+            [USDC_ADDRESS, USDT_ADDRESS]
+        );
+
+        // Encode actions and params for modifyLiquidities
+        // Format: abi.encode(bytes actions, bytes[] params)
+        const encodedActions = ethers.AbiCoder.defaultAbiCoder().encode(
+            ['bytes', 'bytes[]'],
+            [actions, [mintParams, settleParams]]
+        );
+
         const deadline = Math.floor(Date.now() / 1000) + 300; // 5 minutes from now
         
-        const mintTx = await positionManager.mint(
-            poolKey,
-            tickLower,
-            tickUpper,
-            amount0Desired,
-            amount1Desired,
-            amount0Min,
-            amount1Min,
-            signer.address, // recipient
-            deadline
-        );
+        console.log(`   Calling modifyLiquidities...`);
+        console.log(`   Liquidity: ${finalLiquidity.toString()}`);
+        console.log(`   Deadline: ${deadline}`);
+        
+        const mintTx = await positionManager.modifyLiquidities(encodedActions, deadline);
         
         console.log(`   Transaction: ${mintTx.hash}`);
         const mintReceipt = await mintTx.wait();
         console.log(`   ✅ Liquidity position minted in block ${mintReceipt.blockNumber}`);
-
-        // Try to get the tokenId from events if available
-        try {
-            const mintEvent = mintReceipt.logs.find(log => {
-                try {
-                    const parsed = positionManager.interface.parseLog(log);
-                    return parsed && parsed.name === 'Transfer';
-                } catch {
-                    return false;
-                }
-            });
-            if (mintEvent) {
-                console.log(`   📝 Position NFT minted`);
-            }
-        } catch (e) {
-            // Ignore if we can't parse events
-        }
 
     } catch (error) {
         console.error(`\n❌ Error adding liquidity:`, error.message);
@@ -337,6 +400,8 @@ async function setupPoolAndLiquidity() {
         console.error(`   - Invalid tick range`);
         console.error(`   - PositionManager not deployed or wrong address`);
         console.error(`   - Slippage too high`);
+        console.error(`   - Action encoding incorrect`);
+        console.error(`   - Liquidity calculation incorrect (needs proper Uniswap v4 math)`);
         throw error;
     }
 
