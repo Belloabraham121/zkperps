@@ -46,114 +46,107 @@
   - [x] Define `MarketData` type with all required fields (in `types/interfaces.ts`)
   - [x] Define `PoolKey` type mapping (in `types/interfaces.ts`)
   - [x] Define `SwapEvent` type for recent swaps (in `types/interfaces.ts`)
-  - [ ] Add validation for market data
+  - [x] Add validation for market data
 
 ### 3. Trading Strategy Implementations
-- [ ] **Momentum Strategy**
-  - [ ] Create `strategies/MomentumAgent.ts`
-  - [ ] Implement momentum calculation (price change over time)
-  - [ ] Implement trade decision logic (threshold-based)
-  - [ ] Implement amount calculation based on confidence
-  - [ ] Add configuration for momentum thresholds
+- [x] **Momentum Strategy**
+  - [x] Create `strategies/MomentumAgent.ts`
+  - [x] Implement momentum calculation (price change over time)
+  - [x] Implement trade decision logic (threshold-based)
+  - [x] Implement amount calculation based on confidence
+  - [x] Add configuration for momentum thresholds
   - [ ] Test with various market conditions
 
-- [ ] **Arbitrage Strategy**
-  - [ ] Create `strategies/ArbitrageAgent.ts`
-  - [ ] Implement cross-pool price comparison
-  - [ ] Implement arbitrage opportunity detection
-  - [ ] Implement trade direction calculation
-  - [ ] Add support for multiple pools
+- [x] **Arbitrage Strategy**
+  - [x] Create `strategies/ArbitrageAgent.ts`
+  - [x] Implement cross-pool price comparison
+  - [x] Implement arbitrage opportunity detection
+  - [x] Implement trade direction calculation
+  - [x] Add support for multiple pools
   - [ ] Test arbitrage detection accuracy
 
-- [ ] **Liquidity-Based Strategy**
-  - [ ] Create `strategies/LiquidityAgent.ts`
-  - [ ] Implement liquidity threshold checking
-  - [ ] Implement trade decision based on liquidity
-  - [ ] Implement amount scaling with liquidity
-  - [ ] Add configuration for liquidity thresholds
+- [x] **Liquidity-Based Strategy**
+  - [x] Create `strategies/LiquidityAgent.ts`
+  - [x] Implement liquidity threshold checking
+  - [x] Implement trade decision based on liquidity
+  - [x] Implement amount scaling with liquidity
+  - [x] Add configuration for liquidity thresholds
   - [ ] Test with various liquidity conditions
 
-- [ ] **Mean Reversion Strategy** (Optional)
-  - [ ] Create `strategies/MeanReversionAgent.ts`
-  - [ ] Implement price deviation calculation
-  - [ ] Implement mean reversion logic
+- [x] **Mean Reversion Strategy** (Optional)
+  - [x] Create `strategies/MeanReversionAgent.ts`
+  - [x] Implement price deviation calculation
+  - [x] Implement mean reversion logic
   - [ ] Test mean reversion detection
 
-- [ ] **Custom Strategy Template**
-  - [ ] Create `strategies/BaseStrategy.ts` as template
-  - [ ] Document how to create new strategies
-  - [ ] Add example strategy implementation
+- [x] **Custom Strategy Template**
+  - [x] Create `strategies/BaseStrategy.ts` as template
+  - [x] Document how to create new strategies
+  - [x] Add example strategy implementation
 
 ### 4. Agent Integration with PrivBatchHook
-- [ ] **Implement commitment submission**
-  - [ ] Create function to compute commitment hash
-  - [ ] Create function to submit commitment to hook
-  - [ ] Store reveal data off-chain (private)
-  - [ ] Implement nonce generation and management
-  - [ ] Add deadline calculation
-  - [ ] Add error handling for failed commitments
+- [x] **Implement commitment submission**
+  - [x] Create function to compute commitment hash
+  - [x] Create function to submit commitment to hook
+  - [x] Store reveal data off-chain (private)
+  - [x] Implement nonce generation and management
+  - [x] Add deadline calculation
+  - [x] Add error handling for failed commitments
 
-- [ ] **Implement reveal collection**
-  - [ ] Create function to collect reveals from agents
-  - [ ] Match reveals to commitments
-  - [ ] Validate reveal data
-  - [ ] Prepare reveals for batch execution
-  - [ ] Add support for multiple agents revealing
+- [x] **Implement reveal collection**
+  - [x] Create function to collect reveals from agents
+  - [x] Match reveals to commitments
+  - [x] Validate reveal data
+  - [x] Prepare reveals for batch execution
+  - [x] Add support for multiple agents revealing
 
-- [ ] **Implement batch execution coordination**
-  - [ ] Create function to check batch readiness (`checker()`)
-  - [ ] Create function to collect all agent reveals
-  - [ ] Create function to execute batch via hook
-  - [ ] Add error handling for failed executions
-  - [ ] Add retry logic for failed batches
+- [x] **Implement batch execution coordination**
+  - [x] Create function to check batch readiness (`checker()`)
+  - [x] Create function to collect all agent reveals
+  - [x] Create function to execute batch via hook
+  - [x] Add error handling for failed executions
+  - [x] Add retry logic for failed batches
 
-- [ ] **Implement token distribution handling**
-  - [ ] Listen for `TokensDistributed` events
-  - [ ] Update agent balances after distribution
-  - [ ] Track agent performance metrics
-  - [ ] Log distribution results
+- [x] **Implement token distribution handling**
+  - [x] Listen for `TokensDistributed` events
+  - [x] Update agent balances after distribution
+  - [x] Track agent performance metrics
+  - [x] Log distribution results
 
 ### 5. Agent Configuration & Management
-- [ ] **Create configuration system**
-  - [ ] Create `config/agentConfig.ts` for agent configurations
-  - [ ] Support environment variables for sensitive data
-  - [ ] Support JSON config files for agent settings
-  - [ ] Add validation for configurations
-  - [ ] Document configuration options
+- [x] **Create configuration system**
+  - [x] Create `config/agentConfig.ts` for agent configurations
+  - [x] Support environment variables for sensitive data
+  - [x] Support JSON config files for agent settings
+  - [x] Add validation for configurations
+  - [x] Document configuration options
 
-- [ ] **Implement agent registry** (Optional On-Chain)
-  - [ ] Create `AgentRegistry.sol` contract (if needed)
-  - [ ] Implement agent registration
-  - [ ] Implement reputation tracking
-  - [ ] Implement agent status management
-  - [ ] Add events for agent actions
-
-- [ ] **Create agent lifecycle management**
-  - [ ] Implement agent start/stop functionality
-  - [ ] Implement agent health monitoring
-  - [ ] Implement agent restart on failure
-  - [ ] Add logging for agent lifecycle events
+- [x] **Create agent lifecycle management**
+  - [x] Implement agent start/stop functionality
+  - [x] Implement agent health monitoring
+  - [x] Implement agent restart on failure
+  - [x] Add logging for agent lifecycle events
 
 ### 6. Agent Coordination & Communication
-- [ ] **Implement multi-agent coordination**
-  - [ ] Create coordination mechanism for batch timing
-  - [ ] Implement agent signaling (readiness, preferences)
-  - [ ] Add support for agent voting on batch parameters
-  - [ ] Implement conflict resolution for agent decisions
+- [x] **Implement multi-agent coordination**
+  - [x] Create coordination mechanism for batch timing
+  - [x] Implement agent signaling (readiness, preferences)
+  - [x] Add support for agent voting on batch parameters
+  - [x] Implement conflict resolution for agent decisions
 
-- [ ] **Create agent communication layer** (Optional)
-  - [ ] Implement message passing between agents
-  - [ ] Implement shared state management
-  - [ ] Add support for agent collaboration
+- [x] **Create agent communication layer**
+  - [x] Implement message passing between agents
+  - [x] Implement shared state management
+  - [x] Add support for agent collaboration
   - [ ] Document communication protocols
 
 ### 7. Testing & Validation
-- [ ] **Unit tests for agents**
-  - [ ] Test individual strategy implementations
-  - [ ] Test market data fetching
-  - [ ] Test commitment submission
-  - [ ] Test reveal collection
-  - [ ] Test batch execution coordination
+- [x] **Unit tests for agents**
+  - [x] Test individual strategy implementations
+  - [x] Test market data fetching
+  - [x] Test commitment submission
+  - [x] Test reveal collection
+  - [x] Test batch execution coordination
 
 - [ ] **Integration tests**
   - [ ] Test agent with mock PrivBatchHook

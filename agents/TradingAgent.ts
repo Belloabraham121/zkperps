@@ -200,10 +200,27 @@ export abstract class TradingAgent {
   protected async monitorPool(pool: PoolKey): Promise<void> {
     // Fetch market data
     const marketData = await this.fetchMarketData(pool);
-    
+
+    // Update activity timestamp on every successful monitoring cycle
+    this.metrics.lastActivity = Date.now();
+
     // Make trading decision using strategy
     const decision = await this.strategy.shouldTrade(marketData, this.config);
-    
+
+    // Log the decision (concise)
+    const poolLabel = `${pool.currency0.slice(0, 8)}../${pool.currency1.slice(0, 8)}..`;
+    if (decision.shouldTrade) {
+      console.log(
+        `[${this.config.agentId}] 📈 TRADE SIGNAL on ${poolLabel}: ` +
+        `${decision.direction} | confidence=${(decision.confidence * 100).toFixed(1)}% | ` +
+        `amount=${decision.amountIn}`
+      );
+    } else {
+      console.log(
+        `[${this.config.agentId}] ⏳ ${poolLabel} — price=${marketData.currentPrice} liq=${marketData.totalLiquidity} — ${decision.reasoning.slice(0, 80)}`
+      );
+    }
+
     // If decision is to trade, submit commitment
     if (decision.shouldTrade && decision.direction && decision.amountIn) {
       await this.submitCommitment(pool, decision);

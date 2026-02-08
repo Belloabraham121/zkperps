@@ -1,12 +1,15 @@
 /**
  * Market Data Utilities
- * 
+ *
  * Functions for fetching market data from Uniswap v4 pools including:
- * - Current price
+ * - Current price (via extsload → StateLibrary layout)
  * - Liquidity data
  * - Volume calculations
  * - Price changes over time
  * - Recent swap events
+ *
+ * V4 reads state via `extsload` on the PoolManager.
+ * See contracts/lib/v4-core/src/libraries/StateLibrary.sol
  */
 
 import { ethers } from 'ethers';
@@ -23,30 +26,38 @@ export interface MarketDataCache {
   ttl: number; // Time to live in milliseconds
 }
 
+// ─── Constants (matches StateLibrary.sol) ─────────────────────
+const POOLS_SLOT = '0x0000000000000000000000000000000000000000000000000000000000000006';
+const LIQUIDITY_OFFSET = 3;
+
 export class MarketDataFetcher {
   protected provider: ethers.JsonRpcProvider;
   protected poolManagerAddress: string;
   private cache: Map<PoolId, MarketDataCache>;
-  private defaultCacheTTL: number; // Default cache TTL in milliseconds
+  private defaultCacheTTL: number;
 
-  // Uniswap v4 PoolManager ABI
+  // PoolManager ABI – only the functions we actually need
   private readonly POOL_MANAGER_ABI = [
-    'function getSlot0(bytes32 poolId) external view returns (uint160 sqrtPriceX96, int24 tick, uint24 protocolFee, uint24 lpFee)',
-    'function getLiquidity(bytes32 poolId) external view returns (uint128 liquidity)',
-    'function getLiquidityAtTick(bytes32 poolId, int24 tick) external view returns (uint128 liquidity)',
+    // extsload: read a single storage slot
+    'function extsload(bytes32 slot) external view returns (bytes32)',
+    // extsload: read N contiguous slots
+    'function extsload(bytes32 startSlot, uint256 nSlots) external view returns (bytes32[])',
+    // Events
     'event Swap(bytes32 indexed poolId, address indexed sender, int128 amount0, int128 amount1, uint160 sqrtPriceX96, uint128 liquidity, int24 tick)',
   ];
 
   constructor(
     provider: ethers.JsonRpcProvider,
     poolManagerAddress: string,
-    cacheTTL: number = 30000 // Default 30 seconds
+    cacheTTL: number = 30000
   ) {
     this.provider = provider;
     this.poolManagerAddress = poolManagerAddress;
     this.cache = new Map();
     this.defaultCacheTTL = cacheTTL;
   }
+
+  // ─── Public API ──────────────────────────────────────────────
 
   /**
    * Fetch complete market data for a pool
@@ -60,20 +71,29 @@ export class MarketDataFetcher {
       return cached.data;
     }
 
-    // Fetch fresh data
-    const [currentPrice, liquidity, recentSwaps] = await Promise.all([
-      this.fetchCurrentPrice(poolId),
-      this.fetchLiquidity(poolId),
-      this.fetchRecentSwaps(poolId, 10), // Last 10 swaps
+    // Fetch fresh data — individual failures return fallback values
+    const [slot0, liquidity, recentSwaps] = await Promise.all([
+      this.fetchSlot0(poolId).catch(() => null),
+      this.fetchLiquidity(poolId).catch(() => 0n),
+      this.fetchRecentSwaps(poolId, 10).catch(() => []),
     ]);
 
-    // Calculate price changes (simplified - would need historical data for accurate calculation)
-    const priceChange1h = await this.calculatePriceChange(poolId, 3600); // 1 hour
-    const priceChange24h = await this.calculatePriceChange(poolId, 86400); // 24 hours
+    const sqrtPriceX96 = slot0?.sqrtPriceX96 ?? 0n;
 
-    // Calculate volumes
+    // Derive human-readable price from sqrtPriceX96
+    const currentPrice = this.sqrtPriceX96ToPrice(sqrtPriceX96);
+
+    // Price changes (would require historical data – simplified for now)
+    const priceChange1h = await this.calculatePriceChange(poolId, 3600);
+    const priceChange24h = await this.calculatePriceChange(poolId, 86400);
+
+    // Volumes
     const volume1h = this.calculateVolume(recentSwaps, 3600);
     const volume24h = this.calculateVolume(recentSwaps, 86400);
+
+    // Estimate per-side liquidity (equal split — real impl would use ticks)
+    const liq0 = liquidity / 2n;
+    const liq1 = liquidity - liq0;
 
     const marketData: MarketData = {
       poolId,
@@ -81,9 +101,9 @@ export class MarketDataFetcher {
       currentPrice: currentPrice.toString(),
       priceChange1h,
       priceChange24h,
-      totalLiquidity: liquidity.total.toString(),
-      liquidity0: liquidity.liquidity0.toString(),
-      liquidity1: liquidity.liquidity1.toString(),
+      totalLiquidity: liquidity.toString(),
+      liquidity0: liq0.toString(),
+      liquidity1: liq1.toString(),
       volume1h: volume1h.toString(),
       volume24h: volume24h.toString(),
       recentSwaps,
@@ -100,74 +120,67 @@ export class MarketDataFetcher {
     return marketData;
   }
 
-  /**
-   * Fetch current price from pool
-   */
-  async fetchCurrentPrice(poolId: PoolId): Promise<bigint> {
-    try {
-      const poolManager = new ethers.Contract(
-        this.poolManagerAddress,
-        this.POOL_MANAGER_ABI,
-        this.provider
-      );
-
-      // Convert poolId string to bytes32
-      const poolIdBytes32 = ethers.hexlify(ethers.getBytes(poolId));
-      
-      const result = await poolManager.getSlot0(poolIdBytes32);
-      const sqrtPriceX96 = BigInt(result[0].toString());
-      
-      // Convert sqrtPriceX96 to actual price
-      // Price = (sqrtPriceX96 / 2^96)^2
-      // For token1/token0: price = (sqrtPriceX96 / 2^96)^2
-      const Q96 = BigInt(2) ** BigInt(96);
-      const price = (sqrtPriceX96 * sqrtPriceX96) / (Q96 * Q96);
-      
-      return price;
-    } catch (error) {
-      console.error(`Error fetching price for pool ${poolId}:`, error);
-      throw error;
-    }
-  }
+  // ─── V4 extsload reads (replicates StateLibrary.sol) ─────────
 
   /**
-   * Fetch liquidity data from pool
+   * Read Slot0 of a pool via extsload.
+   * Layout (packed in a single bytes32):
+   *   [232..255] lpFee        (24 bits)
+   *   [208..231] protocolFee  (24 bits)
+   *   [160..207] tick         (24 bits, signed)
+   *   [  0..159] sqrtPriceX96 (160 bits)
    */
-  async fetchLiquidity(poolId: PoolId): Promise<{
-    total: bigint;
-    liquidity0: bigint;
-    liquidity1: bigint;
+  async fetchSlot0(poolId: PoolId): Promise<{
+    sqrtPriceX96: bigint;
+    tick: number;
+    protocolFee: number;
+    lpFee: number;
   }> {
-    try {
-      const poolManager = new ethers.Contract(
-        this.poolManagerAddress,
-        this.POOL_MANAGER_ABI,
-        this.provider
-      );
+    const poolManager = new ethers.Contract(
+      this.poolManagerAddress,
+      this.POOL_MANAGER_ABI,
+      this.provider
+    );
 
-      const poolIdBytes32 = ethers.hexlify(ethers.getBytes(poolId));
-      
-      // Get total liquidity
-      const liquidity = await poolManager.getLiquidity(poolIdBytes32);
-      
-      // For simplicity, we'll estimate liquidity0 and liquidity1 as equal
-      // In a real implementation, you'd need to calculate based on current price
-      const liquidity0 = liquidity / BigInt(2);
-      const liquidity1 = liquidity / BigInt(2);
+    const stateSlot = this.getPoolStateSlot(poolId);
+    const raw: string = await poolManager.extsload(stateSlot);
+    const data = BigInt(raw);
 
-      return {
-        total: liquidity,
-        liquidity0,
-        liquidity1,
-      };
-    } catch (error) {
-      console.error(`Error fetching liquidity for pool ${poolId}:`, error);
-      throw error;
-    }
+    // Extract packed fields
+    const sqrtPriceX96 = data & ((1n << 160n) - 1n);
+
+    // tick is 24-bit signed — sign extend
+    let tickRaw = Number((data >> 160n) & 0xFFFFFFn);
+    if (tickRaw >= 0x800000) tickRaw -= 0x1000000; // sign extend 24-bit
+
+    const protocolFee = Number((data >> 184n) & 0xFFFFFFn);
+    const lpFee = Number((data >> 208n) & 0xFFFFFFn);
+
+    return { sqrtPriceX96, tick: tickRaw, protocolFee, lpFee };
   }
 
   /**
-   * Fetch recent swap events
+   * Read total liquidity of a pool via extsload.
+   * Liquidity is at offset 3 from the pool state slot.
+   */
+  async fetchLiquidity(poolId: PoolId): Promise<bigint> {
+    const poolManager = new ethers.Contract(
+      this.poolManagerAddress,
+      this.POOL_MANAGER_ABI,
+      this.provider
+    );
+
+    const stateSlot = this.getPoolStateSlot(poolId);
+    const liquiditySlot = BigInt(stateSlot) + BigInt(LIQUIDITY_OFFSET);
+    const slotHex = '0x' + liquiditySlot.toString(16).padStart(64, '0');
+
+    const raw: string = await poolManager.extsload(slotHex);
+    // Liquidity is uint128 — take bottom 128 bits
+    return BigInt(raw) & ((1n << 128n) - 1n);
+  }
+
+  /**
+   * Fetch recent swap events (limited block range for free-tier RPC)
    */
   async fetchRecentSwaps(poolId: PoolId, limit: number = 10): Promise<SwapEvent[]> {
     try {
@@ -177,14 +190,14 @@ export class MarketDataFetcher {
         this.provider
       );
 
-      const poolIdBytes32 = ethers.hexlify(ethers.getBytes(poolId));
-      
-      // Get swap events from the last 24 hours
-      const fromBlock = await this.provider.getBlockNumber() - 10000; // Approximate last 24h
-      const toBlock = 'latest';
+      const poolIdBytes32 = ethers.zeroPadValue(poolId, 32);
+
+      // Use a small block range to stay within free-tier limits (10 blocks)
+      const currentBlock = await this.provider.getBlockNumber();
+      const fromBlock = Math.max(0, currentBlock - 9);
 
       const filter = poolManager.filters.Swap(poolIdBytes32);
-      const events = await poolManager.queryFilter(filter, fromBlock, toBlock);
+      const events = await poolManager.queryFilter(filter, fromBlock, currentBlock);
 
       // Sort by block number (most recent first) and limit
       const recentEvents = events
@@ -194,52 +207,79 @@ export class MarketDataFetcher {
           if (!('args' in event) || !event.args) {
             throw new Error('Event missing args');
           }
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const args = event.args as any;
           return {
             poolId,
-            timestamp: event.blockNumber, // Will be converted to actual timestamp if needed
+            timestamp: event.blockNumber,
             amount0: args.amount0.toString(),
             amount1: args.amount1.toString(),
-            zeroForOne: args.amount0 < 0, // Negative amount0 means zeroForOne
+            zeroForOne: args.amount0 < 0,
             sqrtPriceX96: args.sqrtPriceX96.toString(),
           } as SwapEvent;
         });
 
-      // Get actual timestamps for events
+      // Fetch actual timestamps (batch friendly)
       const eventsWithTimestamps = await Promise.all(
         recentEvents.map(async (event) => {
-          const block = await this.provider.getBlock(Number(event.timestamp));
-          return {
-            ...event,
-            timestamp: block?.timestamp || Math.floor(Date.now() / 1000),
-          };
+          try {
+            const block = await this.provider.getBlock(Number(event.timestamp));
+            return {
+              ...event,
+              timestamp: block?.timestamp || Math.floor(Date.now() / 1000),
+            };
+          } catch {
+            return { ...event, timestamp: Math.floor(Date.now() / 1000) };
+          }
         })
       );
 
       return eventsWithTimestamps;
     } catch (error) {
-      console.error(`Error fetching recent swaps for pool ${poolId}:`, error);
-      // Return empty array on error rather than throwing
+      // Log once, return empty — the monitoring loop will retry
+      console.warn(`[MarketData] Could not fetch recent swaps for pool ${poolId.slice(0, 10)}...`);
       return [];
     }
   }
 
+  // ─── Helpers ─────────────────────────────────────────────────
+
   /**
-   * Calculate price change over a time period
-   * Note: This is a simplified implementation. For accurate calculations,
-   * you'd need to store historical price data.
+   * Compute pool state storage slot (matches StateLibrary._getPoolStateSlot)
+   * `keccak256(abi.encodePacked(poolId, POOLS_SLOT))`
+   */
+  private getPoolStateSlot(poolId: PoolId): string {
+    // abi.encodePacked(bytes32 poolId, bytes32 POOLS_SLOT) = just concatenate
+    const packed = ethers.concat([
+      ethers.zeroPadValue(poolId, 32),
+      POOLS_SLOT,
+    ]);
+    return ethers.keccak256(packed);
+  }
+
+  /**
+   * Convert sqrtPriceX96 to a human-readable price string.
+   * price = (sqrtPriceX96 / 2^96)^2
+   */
+  private sqrtPriceX96ToPrice(sqrtPriceX96: bigint): string {
+    if (sqrtPriceX96 === 0n) return '0';
+
+    // Use floating point for display
+    const Q96 = 2 ** 96;
+    const sqrtPrice = Number(sqrtPriceX96) / Q96;
+    const price = sqrtPrice * sqrtPrice;
+
+    // Return with reasonable precision
+    return price.toPrecision(8);
+  }
+
+  /**
+   * Calculate price change over a time period.
+   * Simplified — returns 0 until historical storage is implemented.
    */
   async calculatePriceChange(_poolId: PoolId, _timeWindowSeconds: number): Promise<number> {
-    try {
-      // For now, return 0 as we don't have historical data storage
-      // In a production system, you'd query historical prices from a database
-      // or use a price oracle
-      // TODO: Implement historical price tracking
-      return 0;
-    } catch (error) {
-      console.error(`Error calculating price change for pool ${_poolId}:`, error);
-      return 0;
-    }
+    // TODO: Implement historical price tracking (DB or in-memory ring buffer)
+    return 0;
   }
 
   /**
@@ -249,11 +289,10 @@ export class MarketDataFetcher {
     const now = Date.now() / 1000;
     const cutoffTime = now - timeWindowSeconds;
 
-    let totalVolume = BigInt(0);
+    let totalVolume = 0n;
 
     for (const swap of swaps) {
       if (swap.timestamp >= cutoffTime) {
-        // Add absolute value of both amounts
         const amount0 = BigInt(swap.amount0);
         const amount1 = BigInt(swap.amount1);
         totalVolume += (amount0 < 0 ? -amount0 : amount0) + (amount1 < 0 ? -amount1 : amount1);
@@ -264,7 +303,7 @@ export class MarketDataFetcher {
   }
 
   /**
-   * Get pool ID from pool key (matches TradingAgent implementation)
+   * Get pool ID from pool key
    */
   private getPoolId(pool: PoolKey): PoolId {
     const encoded = ethers.AbiCoder.defaultAbiCoder().encode(
@@ -274,23 +313,17 @@ export class MarketDataFetcher {
     return ethers.keccak256(encoded);
   }
 
-  /**
-   * Clear cache for a specific pool
-   */
+  /** Clear cache for a specific pool */
   clearCache(poolId: PoolId): void {
     this.cache.delete(poolId);
   }
 
-  /**
-   * Clear all cache
-   */
+  /** Clear all cache */
   clearAllCache(): void {
     this.cache.clear();
   }
 
-  /**
-   * Set cache TTL for a specific pool
-   */
+  /** Set cache TTL for a specific pool */
   setCacheTTL(poolId: PoolId, ttl: number): void {
     const cached = this.cache.get(poolId);
     if (cached) {
@@ -298,16 +331,12 @@ export class MarketDataFetcher {
     }
   }
 
-  /**
-   * Get the provider instance
-   */
+  /** Get the provider instance */
   getProvider(): ethers.JsonRpcProvider {
     return this.provider;
   }
 
-  /**
-   * Get the pool manager address
-   */
+  /** Get the pool manager address */
   getPoolManagerAddress(): string {
     return this.poolManagerAddress;
   }
