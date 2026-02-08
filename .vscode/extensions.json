@@ -1,0 +1,7 @@
+{
+  "recommendations": [
+    // Circom syntax highlighting extension
+    // Install manually: https://github.com/iden3/circom-vscode or use VSIX
+    "circom.circom"
+  ]
+}

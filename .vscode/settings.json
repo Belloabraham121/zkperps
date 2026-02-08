@@ -1,0 +1,36 @@
+{
+  // File associations for Circom files
+  "files.associations": {
+    "*.circom": "circom"  // Use JavaScript highlighting as fallback
+  },
+  
+  // Editor settings for Circom files
+  "[circom]": {
+    "editor.defaultFormatter": null,
+    "editor.tabSize": 4,
+    "editor.insertSpaces": true,
+    "editor.formatOnSave": false
+  },
+  
+  // Use JavaScript highlighting for Circom files (fallback)
+  "[javascript]": {
+    "editor.tabSize": 4,
+    "editor.insertSpaces": true
+  },
+  
+  // Search settings - exclude build artifacts
+  "search.exclude": {
+    "**/build": true,
+    "**/node_modules": true,
+    "**/out": true,
+    "**/cache": true
+  },
+  
+  // File watcher exclusions
+  "files.watcherExclude": {
+    "**/build/**": true,
+    "**/node_modules/**": true,
+    "**/out/**": true,
+    "**/cache/**": true
+  }
+}

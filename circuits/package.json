@@ -1,0 +1,28 @@
+{
+  "name": "privbatch-circuits",
+  "version": "1.0.0",
+  "description": "ZK circuits for PrivBatch commitment proofs",
+  "main": "commitment-proof.circom",
+  "scripts": {
+    "compile": "circom commitment-proof.circom --r1cs --wasm --sym -o ../build/zk",
+    "setup": "snarkjs powersoftau new bn128 12 ../build/zk/pot12_0000.ptau",
+    "contribute": "snarkjs powersoftau contribute ../build/zk/pot12_0000.ptau ../build/zk/pot12_0001.ptau --name=\"first\" -v",
+    "setup-groth16": "snarkjs groth16 setup ../build/zk/commitment-proof.r1cs ../build/zk/pot12_0001.ptau ../build/zk/zkey_0000.zkey",
+    "contribute-zkey": "snarkjs zkey contribute ../build/zk/zkey_0000.zkey ../build/zk/final.zkey --name=\"final\" -v",
+    "export-vkey": "snarkjs zkey export verificationkey ../build/zk/final.zkey ../build/zk/vkey.json",
+    "export-verifier": "snarkjs zkey export solidityverifier ../build/zk/final.zkey ../contracts/CommitmentVerifier.sol"
+  },
+  "dependencies": {
+    "circomlib": "^2.0.5",
+    "snarkjs": "^0.7.0"
+  },
+  "keywords": [
+    "zk",
+    "zero-knowledge",
+    "circom",
+    "groth16",
+    "poseidon"
+  ],
+  "author": "",
+  "license": "MIT"
+}
