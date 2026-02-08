@@ -24,8 +24,8 @@ export interface MarketDataCache {
 }
 
 export class MarketDataFetcher {
-  private provider: ethers.JsonRpcProvider;
-  private poolManagerAddress: string;
+  protected provider: ethers.JsonRpcProvider;
+  protected poolManagerAddress: string;
   private cache: Map<PoolId, MarketDataCache>;
   private defaultCacheTTL: number; // Default cache TTL in milliseconds
 
@@ -296,6 +296,20 @@ export class MarketDataFetcher {
     if (cached) {
       cached.ttl = ttl;
     }
+  }
+
+  /**
+   * Get the provider instance
+   */
+  getProvider(): ethers.JsonRpcProvider {
+    return this.provider;
+  }
+
+  /**
+   * Get the pool manager address
+   */
+  getPoolManagerAddress(): string {
+    return this.poolManagerAddress;
   }
 }
 
