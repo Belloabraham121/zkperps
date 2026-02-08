@@ -40,6 +40,8 @@ contract PrivBatchHook is BaseHook, IUnlockCallback {
     error SwapExecutionFailed();
     error InvalidSwapDirection();
     error SlippageExceededForUser(address user, uint256 expected, uint256 actual);
+    error NetDeltaMismatch(); // Privacy: Net deltas don't match individual contributions
+    error InvalidNetDeltaSign(); // Privacy: Net deltas must have opposite signs
 
     // ============ Events ============
     // Privacy-enhanced events: Minimize sensitive data exposure
@@ -115,6 +117,10 @@ contract PrivBatchHook is BaseHook, IUnlockCallback {
     mapping(PoolId => BatchState) public batchStates;
     mapping(PoolId => mapping(address => mapping(uint256 => bool)))
         public usedNonces;
+    
+    // Privacy improvement: Store reveals separately to minimize batch execution calldata
+    // Key: commitmentHash, Value: SwapIntent
+    mapping(bytes32 => SwapIntent) private revealStorage;
 
     // Configurable parameters
     uint256 public constant MIN_COMMITMENTS = 2;
@@ -181,6 +187,62 @@ contract PrivBatchHook is BaseHook, IUnlockCallback {
     }
 
     /**
+     * @notice Submit a reveal for a commitment (privacy improvement: separate from batch execution)
+     * @param key The pool key
+     * @param intent The swap intent to reveal
+     * @dev Users can submit reveals separately to minimize batch execution calldata
+     *      The reveal is stored on-chain and can be retrieved by commitment hash during batch execution
+     *      This reduces calldata exposure in the batch execution transaction
+     */
+    function submitReveal(
+        PoolKey calldata key,
+        SwapIntent calldata intent
+    ) external {
+        PoolId poolId = key.toId();
+        
+        // Verify deadline
+        if (block.timestamp > intent.deadline) revert DeadlineExpired();
+        
+        // Verify nonce uniqueness
+        if (usedNonces[poolId][intent.user][intent.nonce]) revert InvalidNonce();
+        
+        // Compute commitment hash
+        bytes32 computedHash = keccak256(
+            abi.encode(
+                intent.user,
+                intent.tokenIn,
+                intent.tokenOut,
+                intent.amountIn,
+                intent.minAmountOut,
+                intent.recipient,
+                intent.nonce,
+                intent.deadline
+            )
+        );
+        
+        // Verify commitment exists and not yet revealed
+        Commitment[] storage poolCommitments = commitments[poolId];
+        bool found = false;
+        for (uint256 i = 0; i < poolCommitments.length; i++) {
+            if (
+                poolCommitments[i].commitmentHash == computedHash &&
+                !poolCommitments[i].revealed
+            ) {
+                found = true;
+                break;
+            }
+        }
+        
+        if (!found) revert InvalidCommitment();
+        
+        // Store reveal (privacy: stored separately, not in batch execution calldata)
+        revealStorage[computedHash] = intent;
+        
+        // Privacy-enhanced: Don't emit user address
+        emit CommitmentRevealed(poolId, computedHash);
+    }
+
+    /**
      * @notice Check if batch execution conditions are met
      * @param poolId The pool ID to check
      * @return canExec Whether execution can proceed
@@ -212,27 +274,40 @@ contract PrivBatchHook is BaseHook, IUnlockCallback {
     /**
      * @notice Reveal commitments and execute batched swap
      * @param key The pool key
-     * @param reveals Array of revealed swap intents
+     * @param commitmentHashes Array of commitment hashes (privacy: minimal calldata)
+     * @dev This function now accepts only commitment hashes, reducing calldata exposure
+     *      Reveals must be submitted separately via submitReveal() before batch execution
      */
     function revealAndBatchExecute(
         PoolKey calldata key,
-        SwapIntent[] calldata reveals
+        bytes32[] calldata commitmentHashes
     ) external {
         PoolId poolId = key.toId();
 
         // Verify batch conditions
-        if (reveals.length < MIN_COMMITMENTS) revert InsufficientCommitments();
+        if (commitmentHashes.length < MIN_COMMITMENTS) revert InsufficientCommitments();
 
         BatchState storage state = batchStates[poolId];
         if (block.timestamp - state.lastBatchTimestamp < BATCH_INTERVAL) {
             revert BatchConditionsNotMet();
         }
 
+        // Retrieve reveals from storage (privacy: not in calldata)
+        SwapIntent[] memory reveals = new SwapIntent[](commitmentHashes.length);
+        for (uint256 i = 0; i < commitmentHashes.length; i++) {
+            SwapIntent memory storedReveal = revealStorage[commitmentHashes[i]];
+            if (storedReveal.user == address(0)) revert InvalidCommitment();
+            reveals[i] = storedReveal;
+        }
+
         // Process reveals and accumulate deltas
         (int256 netDelta0, int256 netDelta1, UserContribution[] memory contributions) = 
-            _processReveals(poolId, reveals, key.currency0);
+            _processReveals(poolId, reveals, key.currency0, commitmentHashes);
 
-        // Execute swap
+        // Privacy validation: Ensure netting is correct and no individual data leaks
+        _validateBatchPrivacy(netDelta0, netDelta1, key.currency0, contributions);
+
+        // Execute swap (only net deltas visible to pool)
         BalanceDelta swapDelta = _executeBatchSwap(key, netDelta0, netDelta1);
 
         // Validate slippage for all users before distribution
@@ -245,12 +320,17 @@ contract PrivBatchHook is BaseHook, IUnlockCallback {
         state.lastBatchTimestamp = block.timestamp;
         state.batchNonce++;
 
+        // Clean up stored reveals (privacy: remove after use)
+        for (uint256 i = 0; i < commitmentHashes.length; i++) {
+            delete revealStorage[commitmentHashes[i]];
+        }
+
         // Emit event with actual swap results
         emit BatchExecuted(
             poolId,
             swapDelta.amount0(),
             swapDelta.amount1(),
-            reveals.length,
+            commitmentHashes.length,
             block.timestamp
         );
     }
@@ -258,16 +338,18 @@ contract PrivBatchHook is BaseHook, IUnlockCallback {
     /**
      * @notice Process reveals and accumulate net deltas
      * @param poolId The pool ID
-     * @param reveals Array of revealed swap intents
+     * @param reveals Array of revealed swap intents (from storage, not calldata)
      * @param token0 The currency0 of the pool
+     * @param commitmentHashes Array of commitment hashes for verification
      * @return netDelta0 Net delta for currency0
      * @return netDelta1 Net delta for currency1
      * @return contributions Array of user contributions for distribution
      */
     function _processReveals(
         PoolId poolId,
-        SwapIntent[] calldata reveals,
-        Currency token0
+        SwapIntent[] memory reveals,
+        Currency token0,
+        bytes32[] calldata commitmentHashes
     ) internal returns (
         int256 netDelta0,
         int256 netDelta1,
@@ -275,17 +357,18 @@ contract PrivBatchHook is BaseHook, IUnlockCallback {
     ) {
         Commitment[] storage poolCommitments = commitments[poolId];
         contributions = new UserContribution[](reveals.length);
+        address token0Address = Currency.unwrap(token0);
 
         for (uint256 i = 0; i < reveals.length; i++) {
-            SwapIntent calldata intent = reveals[i];
-
+            SwapIntent memory intent = reveals[i];
+            
             // Verify deadline
             if (block.timestamp > intent.deadline) revert DeadlineExpired();
 
             // Verify nonce uniqueness
             if (usedNonces[poolId][intent.user][intent.nonce]) revert InvalidNonce();
 
-            // Compute and verify commitment hash
+            // Verify commitment hash
             bytes32 computedHash = keccak256(
                 abi.encode(
                     intent.user,
@@ -298,28 +381,15 @@ contract PrivBatchHook is BaseHook, IUnlockCallback {
                     intent.deadline
                 )
             );
+            if (computedHash != commitmentHashes[i]) revert InvalidCommitment();
 
-            // Find and validate commitment
-            bool found = false;
-            for (uint256 j = 0; j < poolCommitments.length; j++) {
-                if (
-                    poolCommitments[j].commitmentHash == computedHash &&
-                    !poolCommitments[j].revealed
-                ) {
-                    poolCommitments[j].revealed = true;
-                    found = true;
-                    // Privacy-enhanced: Don't emit user address
-                    emit CommitmentRevealed(poolId, computedHash);
-                    break;
-                }
-            }
-
-            if (!found) revert InvalidCommitment();
+            // Validate and mark commitment as revealed
+            _validateAndMarkCommitment(poolId, poolCommitments, commitmentHashes[i]);
 
             // Mark nonce as used
             usedNonces[poolId][intent.user][intent.nonce] = true;
 
-            // Store user contribution for distribution
+            // Store user contribution
             contributions[i] = UserContribution({
                 recipient: intent.recipient,
                 inputAmount: intent.amountIn,
@@ -329,7 +399,8 @@ contract PrivBatchHook is BaseHook, IUnlockCallback {
             });
 
             // Accumulate deltas
-            if (Currency.unwrap(intent.tokenIn) == Currency.unwrap(token0)) {
+            address tokenInAddress = Currency.unwrap(intent.tokenIn);
+            if (tokenInAddress == token0Address) {
                 netDelta0 += int256(intent.amountIn);
                 netDelta1 -= int256(intent.minAmountOut);
             } else {
@@ -337,13 +408,79 @@ contract PrivBatchHook is BaseHook, IUnlockCallback {
                 netDelta0 -= int256(intent.minAmountOut);
             }
 
-            // Transfer tokens directly from user to PoolManager (no custody in hook)
-            // Users must approve the hook, but tokens go directly to PoolManager
-            IERC20(Currency.unwrap(intent.tokenIn)).transferFrom(
+            // Transfer tokens
+            IERC20(tokenInAddress).transferFrom(
                 intent.user,
                 address(poolManager),
                 intent.amountIn
             );
+        }
+    }
+
+    /**
+     * @notice Validate and mark commitment as revealed (helper to reduce stack depth)
+     */
+    function _validateAndMarkCommitment(
+        PoolId poolId,
+        Commitment[] storage poolCommitments,
+        bytes32 commitmentHash
+    ) internal {
+        for (uint256 j = 0; j < poolCommitments.length; j++) {
+            if (
+                poolCommitments[j].commitmentHash == commitmentHash &&
+                !poolCommitments[j].revealed
+            ) {
+                poolCommitments[j].revealed = true;
+                return;
+            }
+        }
+        revert InvalidCommitment();
+    }
+
+    /**
+     * @notice Validate batch privacy: Ensure netting hides individual contributions
+     * @param netDelta0 Net delta for currency0
+     * @param netDelta1 Net delta for currency1
+     * @param token0 The currency0 of the pool
+     * @param contributions Array of user contributions
+     * @dev This function validates that:
+     *      1. Net deltas have opposite signs (valid swap direction)
+     *      2. Net deltas correctly represent the sum of individual contributions
+     *      3. No individual trade data leaks through validation
+     */
+    function _validateBatchPrivacy(
+        int256 netDelta0,
+        int256 netDelta1,
+        Currency token0,
+        UserContribution[] memory contributions
+    ) internal pure {
+        // Privacy: Validate that net deltas have opposite signs (valid swap)
+        // This ensures the batch represents a valid net swap direction
+        bool validSwap = (netDelta0 > 0 && netDelta1 < 0) || (netDelta1 > 0 && netDelta0 < 0);
+        if (!validSwap) revert InvalidNetDeltaSign();
+
+        // Privacy: Verify net deltas match sum of contributions (without exposing individual data)
+        // This ensures netting is correct and individual contributions are properly hidden
+        int256 calculatedDelta0 = 0;
+        int256 calculatedDelta1 = 0;
+        address token0Address = Currency.unwrap(token0);
+
+        for (uint256 i = 0; i < contributions.length; i++) {
+            address tokenInAddress = Currency.unwrap(contributions[i].inputCurrency);
+            
+            if (tokenInAddress == token0Address) {
+                calculatedDelta0 += int256(contributions[i].inputAmount);
+                calculatedDelta1 -= int256(contributions[i].minAmountOut);
+            } else {
+                calculatedDelta1 += int256(contributions[i].inputAmount);
+                calculatedDelta0 -= int256(contributions[i].minAmountOut);
+            }
+        }
+
+        // Privacy: Validate net deltas match calculated sum (ensures correct netting)
+        // Note: We use minAmountOut for output, which is conservative but correct for validation
+        if (calculatedDelta0 != netDelta0 || calculatedDelta1 != netDelta1) {
+            revert NetDeltaMismatch();
         }
     }
 

@@ -21,7 +21,7 @@ import {
   PoolId,
   TradingStrategy,
   SwapDirection,
-} from '../types/interfaces';
+} from './types/interfaces';
 
 export abstract class TradingAgent {
   protected config: AgentConfig;

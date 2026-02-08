@@ -9,7 +9,7 @@
  */
 
 import { ethers } from 'ethers';
-import { TradingAgent } from './strategies/TradingAgent';
+import { TradingAgent } from './TradingAgent';
 import {
   AgentConfig,
   AgentStatus,
