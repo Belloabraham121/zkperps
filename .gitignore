@@ -1,0 +1,23 @@
+# Compiler files
+cache/
+out/
+
+# Ignores development broadcast logs
+!/broadcast
+/broadcast/*/31337/
+/broadcast/**/dry-run/
+
+# Docs
+docs/
+
+# Dotenv file
+.env
+HACKATHON_DEMO.md
+prd.md
+PRIVACY_TODO.md
+PROJECT_SUMMARY.md
+PROJECT_STRUCTURE.md
+TODO.md
+QUICKSTART.md
+TOKEN_FLOW_ARCHITECTURE.md
+PRIVACY_IMPROVEMENTS.md

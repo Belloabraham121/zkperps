@@ -1,8 +1,8 @@
 @uniswap/v4-core/=contracts/lib/v4-periphery/lib/v4-core/
 v4-core/=contracts/lib/v4-core/src/
 v4-periphery/=contracts/lib/v4-periphery/
-forge-std/=contracts/lib/forge-std/src/
-ds-test/=contracts/lib/v4-core/lib/forge-std/lib/ds-test/src/
+forge-std/=contracts/lib/v4-core/lib/forge-std/src/
+ds-test/=contracts/lib/v4-core/lib/openzeppelin-contracts/lib/forge-std/lib/ds-test/src/
 solmate/=contracts/lib/v4-core/lib/solmate/
 openzeppelin-contracts/=contracts/lib/v4-core/lib/openzeppelin-contracts/
 @ensdomains/=contracts/lib/v4-core/node_modules/@ensdomains/
@@ -11,4 +11,5 @@ openzeppelin-contracts/=contracts/lib/v4-core/lib/openzeppelin-contracts/
 erc4626-tests/=contracts/lib/v4-core/lib/openzeppelin-contracts/lib/erc4626-tests/
 forge-gas-snapshot/=contracts/lib/v4-periphery/lib/permit2/lib/forge-gas-snapshot/src/
 hardhat/=contracts/lib/v4-core/node_modules/hardhat/
+openzeppelin-foundry-upgrades/=contracts/lib/openzeppelin-foundry-upgrades/src/
 permit2/=contracts/lib/v4-periphery/lib/permit2/
