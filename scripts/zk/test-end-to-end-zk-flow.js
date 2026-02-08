@@ -81,7 +81,8 @@ const PRIV_BATCH_HOOK_ABI = [
 const ERC20_ABI = [
     "function approve(address spender, uint256 amount) returns (bool)",
     "function allowance(address owner, address spender) view returns (uint256)",
-    "function balanceOf(address account) view returns (uint256)"
+    "function balanceOf(address account) view returns (uint256)",
+    "function transferFrom(address from, address to, uint256 amount) returns (bool)"
 ];
 
 /**
@@ -233,21 +234,26 @@ async function testEndToEndZKFlow() {
     const swapIntents = [];
     const deadline = Math.floor(Date.now() / 1000) + 3600; // 1 hour from now
 
+    // Generate unique nonces based on timestamp to avoid conflicts
+    // Use timestamp (seconds) * 1000 + index to ensure uniqueness
+    const baseNonce = Math.floor(Date.now() / 1000) * 1000;
+    console.log(`   Using base nonce: ${baseNonce} (timestamp-based to avoid conflicts)`);
+
     // Pool is USDC (6 decimals, token0) / USDT (18 decimals, token1) at 1:1 raw price
     // We need intents in BOTH directions so net deltas have opposite signs
     //
-    // Intent 1 (nonce 1): sell USDT → buy USDC
+    // Intent 1: sell USDT → buy USDC
     //   netDelta1 += 1000000, netDelta0 -= 800000
-    // Intent 2 (nonce 2): sell USDT → buy USDC
+    // Intent 2: sell USDT → buy USDC
     //   netDelta1 += 1000000, netDelta0 -= 800000
-    // Intent 3 (nonce 3): sell USDC → buy USDT
+    // Intent 3: sell USDC → buy USDT
     //   netDelta0 += 500000, netDelta1 -= 400000
     //
     // Net: netDelta0 = 500000 - 800000 - 800000 = -1100000 (< 0)
     //      netDelta1 = 1000000 + 1000000 - 400000 = 1600000 (> 0)
     // ✅ Opposite signs = valid batch
 
-    // Intent 1: sell USDT → buy USDC (nonce 1)
+    // Intent 1: sell USDT → buy USDC
     swapIntents.push(createSwapIntent(
         user,
         USDT_ADDRESS,   // tokenIn: USDT
@@ -255,11 +261,11 @@ async function testEndToEndZKFlow() {
         '1000000',      // amountIn: 1000000 USDT units (tiny amount)
         '500000',       // minAmountOut: ~50% slippage tolerance (pool has limited liquidity)
         user,
-        1,
+        baseNonce + 1,  // Unique nonce
         deadline
     ));
 
-    // Intent 2: sell USDT → buy USDC (nonce 2)
+    // Intent 2: sell USDT → buy USDC
     swapIntents.push(createSwapIntent(
         user,
         USDT_ADDRESS,   // tokenIn: USDT
@@ -267,11 +273,11 @@ async function testEndToEndZKFlow() {
         '1000000',      // amountIn: 1000000 USDT units (tiny amount)
         '500000',       // minAmountOut: ~50% slippage tolerance
         user,
-        2,
+        baseNonce + 2,  // Unique nonce
         deadline
     ));
 
-    // Intent 3: sell USDC → buy USDT (nonce 3)
+    // Intent 3: sell USDC → buy USDT
     swapIntents.push(createSwapIntent(
         user,
         USDC_ADDRESS,   // tokenIn: USDC
@@ -279,7 +285,7 @@ async function testEndToEndZKFlow() {
         '500000',       // amountIn: 500000 USDC units (0.5 USDC)
         '250000',       // minAmountOut: ~50% slippage tolerance
         user,
-        3,
+        baseNonce + 3,  // Unique nonce
         deadline
     ));
 
@@ -510,16 +516,19 @@ async function testEndToEndZKFlow() {
 
         // Also check if a test transferFrom would work (simulate)
         try {
-            await usdt.transferFrom.staticCall(signer.address, hookAddress, '1000000');
+            // Use staticCall method from ethers v6
+            const usdtTransferFrom = usdt.getFunction('transferFrom');
+            await usdtTransferFrom.staticCall(signer.address, hookAddress, '1000000');
             console.log(`   ✅ USDT transferFrom simulation passed`);
         } catch (e) {
-            console.log(`   ❌ USDT transferFrom simulation FAILED: ${e.message}`);
+            console.log(`   ⚠️  USDT transferFrom simulation: ${e.message}`);
         }
         try {
-            await usdc.transferFrom.staticCall(signer.address, hookAddress, '500000');
+            const usdcTransferFrom = usdc.getFunction('transferFrom');
+            await usdcTransferFrom.staticCall(signer.address, hookAddress, '500000');
             console.log(`   ✅ USDC transferFrom simulation passed`);
         } catch (e) {
-            console.log(`   ❌ USDC transferFrom simulation FAILED: ${e.message}`);
+            console.log(`   ⚠️  USDC transferFrom simulation: ${e.message}`);
         }
     } catch (error) {
         console.error(`   ❌ Approval error: ${error.message}`);

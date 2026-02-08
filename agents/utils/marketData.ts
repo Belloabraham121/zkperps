@@ -1,6 +1,6 @@
 /**
  * Market Data Utilities
- *
+ * 
  * Functions for fetching market data from Uniswap v4 pools including:
  * - Current price (via extsload → StateLibrary layout)
  * - Liquidity data
@@ -136,16 +136,16 @@ export class MarketDataFetcher {
     protocolFee: number;
     lpFee: number;
   }> {
-    const poolManager = new ethers.Contract(
-      this.poolManagerAddress,
-      this.POOL_MANAGER_ABI,
-      this.provider
-    );
+      const poolManager = new ethers.Contract(
+        this.poolManagerAddress,
+        this.POOL_MANAGER_ABI,
+        this.provider
+      );
 
     const stateSlot = this.getPoolStateSlot(poolId);
     const raw: string = await poolManager.extsload(stateSlot);
     const data = BigInt(raw);
-
+      
     // Extract packed fields
     const sqrtPriceX96 = data & ((1n << 160n) - 1n);
 
@@ -155,7 +155,7 @@ export class MarketDataFetcher {
 
     const protocolFee = Number((data >> 184n) & 0xFFFFFFn);
     const lpFee = Number((data >> 208n) & 0xFFFFFFn);
-
+      
     return { sqrtPriceX96, tick: tickRaw, protocolFee, lpFee };
   }
 
@@ -164,11 +164,11 @@ export class MarketDataFetcher {
    * Liquidity is at offset 3 from the pool state slot.
    */
   async fetchLiquidity(poolId: PoolId): Promise<bigint> {
-    const poolManager = new ethers.Contract(
-      this.poolManagerAddress,
-      this.POOL_MANAGER_ABI,
-      this.provider
-    );
+      const poolManager = new ethers.Contract(
+        this.poolManagerAddress,
+        this.POOL_MANAGER_ABI,
+        this.provider
+      );
 
     const stateSlot = this.getPoolStateSlot(poolId);
     const liquiditySlot = BigInt(stateSlot) + BigInt(LIQUIDITY_OFFSET);
@@ -191,7 +191,7 @@ export class MarketDataFetcher {
       );
 
       const poolIdBytes32 = ethers.zeroPadValue(poolId, 32);
-
+      
       // Use a small block range to stay within free-tier limits (10 blocks)
       const currentBlock = await this.provider.getBlockNumber();
       const fromBlock = Math.max(0, currentBlock - 9);
@@ -223,11 +223,11 @@ export class MarketDataFetcher {
       const eventsWithTimestamps = await Promise.all(
         recentEvents.map(async (event) => {
           try {
-            const block = await this.provider.getBlock(Number(event.timestamp));
-            return {
-              ...event,
-              timestamp: block?.timestamp || Math.floor(Date.now() / 1000),
-            };
+          const block = await this.provider.getBlock(Number(event.timestamp));
+          return {
+            ...event,
+            timestamp: block?.timestamp || Math.floor(Date.now() / 1000),
+          };
           } catch {
             return { ...event, timestamp: Math.floor(Date.now() / 1000) };
           }
@@ -279,7 +279,7 @@ export class MarketDataFetcher {
    */
   async calculatePriceChange(_poolId: PoolId, _timeWindowSeconds: number): Promise<number> {
     // TODO: Implement historical price tracking (DB or in-memory ring buffer)
-    return 0;
+      return 0;
   }
 
   /**

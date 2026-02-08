@@ -203,7 +203,7 @@ export abstract class TradingAgent {
 
     // Update activity timestamp on every successful monitoring cycle
     this.metrics.lastActivity = Date.now();
-
+    
     // Make trading decision using strategy
     const decision = await this.strategy.shouldTrade(marketData, this.config);
 
@@ -220,7 +220,7 @@ export abstract class TradingAgent {
         `[${this.config.agentId}] ⏳ ${poolLabel} — price=${marketData.currentPrice} liq=${marketData.totalLiquidity} — ${decision.reasoning.slice(0, 80)}`
       );
     }
-
+    
     // If decision is to trade, submit commitment
     if (decision.shouldTrade && decision.direction && decision.amountIn) {
       await this.submitCommitment(pool, decision);
