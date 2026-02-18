@@ -2,7 +2,7 @@
  * Core interfaces and types for the Agentic Finance component
  */
 
-import { BigNumberish } from 'ethers';
+import { BigNumberish } from "ethers";
 
 /**
  * Uniswap v4 Pool Key structure
@@ -24,8 +24,8 @@ export type PoolId = string;
  * Swap direction
  */
 export enum SwapDirection {
-  ZERO_FOR_ONE = 'ZERO_FOR_ONE', // currency0 -> currency1
-  ONE_FOR_ZERO = 'ONE_FOR_ZERO', // currency1 -> currency0
+  ZERO_FOR_ONE = "ZERO_FOR_ONE", // currency0 -> currency1
+  ONE_FOR_ZERO = "ONE_FOR_ZERO", // currency1 -> currency0
 }
 
 /**
@@ -34,24 +34,24 @@ export enum SwapDirection {
 export interface MarketData {
   poolId: PoolId;
   poolKey: PoolKey;
-  
+
   // Price data
   currentPrice: string; // Current price (token1/token0)
   priceChange1h: number; // Price change percentage over 1 hour
   priceChange24h: number; // Price change percentage over 24 hours
-  
+
   // Liquidity data
   totalLiquidity: string; // Total liquidity in the pool
   liquidity0: string; // Liquidity in currency0
   liquidity1: string; // Liquidity in currency1
-  
+
   // Volume data
   volume1h: string; // Volume over 1 hour
   volume24h: string; // Volume over 24 hours
-  
+
   // Recent activity
   recentSwaps: SwapEvent[]; // Recent swap events
-  
+
   // Timestamp
   timestamp: number; // When this data was collected
 }
@@ -99,21 +99,21 @@ export interface AgentConfig {
   poolManagerAddress: string; // Uniswap v4 PoolManager address
   rpcUrl: string; // RPC endpoint URL
   chainId: number; // Chain ID
-  
+
   // Commitment settings
   commitmentSettings: {
     defaultDeadlineOffset: number; // Default deadline offset in seconds (e.g., 3600 for 1 hour)
     minCommitments: number; // Minimum commitments required for batch execution
     batchInterval: number; // Batch interval in seconds
   };
-  
+
   // Monitoring settings
   monitoringSettings: {
     pollInterval: number; // Poll interval in milliseconds
     maxRetries: number; // Maximum retries for failed operations
     retryDelay: number; // Delay between retries in milliseconds
   };
-  
+
   // Trading settings
   tradingSettings: {
     maxAmountIn: string; // Maximum amount to trade in a single commitment
@@ -131,15 +131,18 @@ export interface TradingStrategy {
    * Strategy name
    */
   name: string;
-  
+
   /**
    * Evaluate market data and decide whether to trade
    * @param marketData Current market data for the pool
    * @param config Agent configuration
    * @returns Trade decision
    */
-  shouldTrade(marketData: MarketData, config: AgentConfig): Promise<TradeDecision>;
-  
+  shouldTrade(
+    marketData: MarketData,
+    config: AgentConfig,
+  ): Promise<TradeDecision>;
+
   /**
    * Calculate the amount to trade based on market conditions
    * @param marketData Current market data
@@ -150,9 +153,9 @@ export interface TradingStrategy {
   calculateAmount(
     marketData: MarketData,
     decision: TradeDecision,
-    config: AgentConfig
+    config: AgentConfig,
   ): Promise<string>;
-  
+
   /**
    * Calculate minimum amount out for slippage protection
    * @param amountIn Amount to trade in
@@ -165,9 +168,9 @@ export interface TradingStrategy {
     amountIn: string,
     marketData: MarketData,
     direction: SwapDirection,
-    slippageBps: number
+    slippageBps: number,
   ): Promise<string>;
-  
+
   /**
    * Get strategy-specific configuration schema
    * @returns Configuration schema/validation rules
@@ -204,11 +207,11 @@ export interface CommitmentData {
  * Agent status
  */
 export enum AgentStatus {
-  STOPPED = 'STOPPED',
-  STARTING = 'STARTING',
-  RUNNING = 'RUNNING',
-  PAUSED = 'PAUSED',
-  ERROR = 'ERROR',
+  STOPPED = "STOPPED",
+  STARTING = "STARTING",
+  RUNNING = "RUNNING",
+  PAUSED = "PAUSED",
+  ERROR = "ERROR",
 }
 
 /**
