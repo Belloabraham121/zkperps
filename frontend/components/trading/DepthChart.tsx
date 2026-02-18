@@ -12,19 +12,25 @@ export function DepthChart() {
 
   const { bids, asks } = useMemo(
     () => generateDepthData(MID_PRICE, MAX_DEPTH),
-    []
+    [],
   );
 
   const maxSize = Math.max(
     ...bids.map((b) => b.size),
     ...asks.map((a) => a.size),
-    1
+    1,
   );
 
   const formatPrice = (p: number) =>
-    p.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    p.toLocaleString("en-US", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
   const formatVolume = (s: number) =>
-    s.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    s.toLocaleString("en-US", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden border-l border-slate-700/50 bg-slate-900/50">
