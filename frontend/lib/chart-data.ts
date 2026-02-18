@@ -93,8 +93,8 @@ export function generateDepthData(
   for (let i = 0; i < levels; i++) {
     const bidPrice = midPrice - halfSpread - i * (midPrice * 0.0005);
     const askPrice = midPrice + halfSpread + i * (midPrice * 0.0005);
-    bids.push({ price: bidPrice, size: rand() * 2 + 0.1 });
-    asks.push({ price: askPrice, size: rand() * 2 + 0.1 });
+    bids.push({ price: bidPrice, size: rand() * 2500 + 50 });
+    asks.push({ price: askPrice, size: rand() * 1600 + 0.1 });
   }
   bids.sort((a, b) => b.price - a.price);
   asks.sort((a, b) => a.price - b.price);

@@ -1,12 +1,15 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { generateDepthData } from "@/lib/chart-data";
 
-const MID_PRICE = 27554;
-const MAX_DEPTH = 12;
+const MID_PRICE = 27594.09;
+const MAX_DEPTH = 8;
 
 export function DepthChart() {
+  const [activeTab, setActiveTab] = useState<"depth" | "book">("depth");
+  const [volumeScale, setVolumeScale] = useState(1);
+
   const { bids, asks } = useMemo(
     () => generateDepthData(MID_PRICE, MAX_DEPTH),
     []
@@ -20,64 +23,119 @@ export function DepthChart() {
 
   const formatPrice = (p: number) =>
     p.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  const formatSize = (s: number) => s.toFixed(3);
+  const formatVolume = (s: number) =>
+    s.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
   return (
-    <div className="flex h-full flex-col border-l border-slate-700/50 bg-slate-900/50">
-      <div className="flex border-b border-slate-700/50">
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden border-l border-slate-700/50 bg-slate-900/50">
+      {/* Tabs: Depth Chart (selected with underline) | Trade Book */}
+      <div className="flex shrink-0 border-b border-slate-700/50">
         <button
           type="button"
-          className="flex-1 px-3 py-2 text-xs font-medium text-sky-400"
+          onClick={() => setActiveTab("depth")}
+          className={`flex-1 px-3 py-2 text-xs font-medium transition-colors ${
+            activeTab === "depth"
+              ? "border-b-2 border-sky-400 text-slate-100"
+              : "text-slate-400 hover:text-slate-200"
+          }`}
         >
           Depth Chart
         </button>
         <button
           type="button"
-          className="flex-1 px-3 py-2 text-xs font-medium text-slate-400 hover:text-slate-200"
+          onClick={() => setActiveTab("book")}
+          className={`flex-1 px-3 py-2 text-xs font-medium transition-colors ${
+            activeTab === "book"
+              ? "border-b-2 border-sky-400 text-slate-100"
+              : "text-slate-400 hover:text-slate-200"
+          }`}
         >
           Trade Book
         </button>
       </div>
-      <div className="grid grid-cols-[1fr_1fr] gap-2 px-2 py-2 text-xs">
+
+      {/* Column headers: FILL PRICE | VOLUME with +/- controls */}
+      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-slate-700/50 px-2 py-1.5 text-xs">
         <div className="font-medium text-slate-400">FILL PRICE</div>
-        <div className="font-medium text-slate-400">VOLUME</div>
+        <div className="flex items-center gap-1">
+          <span className="font-medium text-slate-400">VOLUME</span>
+          <div className="flex items-center rounded border border-slate-600 bg-slate-800/80">
+            <button
+              type="button"
+              onClick={() => setVolumeScale((s) => Math.max(0.5, s - 0.25))}
+              className="px-1.5 py-0.5 text-slate-300 hover:bg-slate-600 hover:text-white"
+              aria-label="Decrease volume scale"
+            >
+              −
+            </button>
+            <button
+              type="button"
+              onClick={() => setVolumeScale((s) => Math.min(2, s + 0.25))}
+              className="px-1.5 py-0.5 text-slate-300 hover:bg-slate-600 hover:text-white"
+              aria-label="Increase volume scale"
+            >
+              +
+            </button>
+          </div>
+        </div>
       </div>
-      {/* Asks (sell side) - top, red */}
-      <div className="flex flex-1 flex-col overflow-auto px-2">
+
+      {/* Scrollable depth content */}
+      <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-2 py-1">
+        {/* Asks (sell) - reddish-pink, prices decrease toward center */}
         <div className="flex flex-col-reverse">
           {asks.map((a, i) => (
             <div
               key={`ask-${i}`}
-              className="grid grid-cols-[1fr_1fr] gap-2 py-0.5"
+              className="grid grid-cols-[1fr_1fr] items-center gap-2 py-0.5"
             >
-              <span className="text-red-400">{formatPrice(a.price)}</span>
-              <div className="flex items-center gap-1">
-                <div
-                  className="h-4 min-w-0 flex-1 rounded bg-red-500/30"
-                  style={{ width: `${(a.size / maxSize) * 100}%`, minWidth: 2 }}
-                />
-                <span className="w-10 shrink-0 text-right text-slate-400">{formatSize(a.size)}</span>
+              <span className="text-rose-400">{formatPrice(a.price)}</span>
+              <div className="flex items-center gap-2">
+                <div className="min-h-0 min-w-0 flex-1">
+                  <div
+                    className="h-4 rounded-sm bg-rose-500/50"
+                    style={{
+                      width: `${Math.min(100, (a.size / maxSize) * 100 * volumeScale)}%`,
+                      minWidth: 2,
+                    }}
+                  />
+                </div>
+                <span className="w-16 shrink-0 text-right text-xs text-slate-300">
+                  {formatVolume(a.size)}
+                </span>
               </div>
             </div>
           ))}
         </div>
-        <div className="my-1 text-center text-base font-semibold text-slate-100">
-          ${formatPrice(MID_PRICE)}
+
+        {/* Current market price - prominent green */}
+        <div className="my-1.5 shrink-0 text-center">
+          <span className="text-lg font-semibold text-green-400">
+            ${formatPrice(MID_PRICE)}
+          </span>
         </div>
-        {/* Bids (buy side) - bottom, green */}
+
+        {/* Bids (buy) - green */}
         <div className="flex flex-col">
           {bids.map((b, i) => (
             <div
               key={`bid-${i}`}
-              className="grid grid-cols-[1fr_1fr] gap-2 py-0.5"
+              className="grid grid-cols-[1fr_1fr] items-center gap-2 py-0.5"
             >
               <span className="text-green-400">{formatPrice(b.price)}</span>
-              <div className="flex items-center gap-1">
-                <div
-                  className="h-4 min-w-0 flex-1 rounded bg-green-500/30"
-                  style={{ width: `${(b.size / maxSize) * 100}%`, minWidth: 2 }}
-                />
-                <span className="w-10 shrink-0 text-right text-slate-400">{formatSize(b.size)}</span>
+              <div className="flex items-center gap-2">
+                <div className="min-h-0 min-w-0 flex-1">
+                  <div
+                    className="h-4 rounded-sm bg-green-500/50"
+                    style={{
+                      width: `${Math.min(100, (b.size / maxSize) * 100 * volumeScale)}%`,
+                      minWidth: 2,
+                    }}
+                  />
+                </div>
+                <span className="w-16 shrink-0 text-right text-xs text-slate-300">
+                  {formatVolume(b.size)}
+                </span>
               </div>
             </div>
           ))}

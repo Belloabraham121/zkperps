@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   createChart,
   CandlestickSeries,
@@ -8,7 +8,6 @@ import {
   ColorType,
   type IChartApi,
   type ISeriesApi,
-  type UTCTimestamp,
 } from "lightweight-charts";
 import { generateCandleData, getOhlcvSummary } from "@/lib/chart-data";
 
@@ -30,14 +29,24 @@ export function PriceChart() {
   const volumeSeriesRef = useRef<ISeriesApi<"Histogram"> | null>(null);
   const [timeframe, setTimeframe] = useState<(typeof TIMEFRAMES)[number]>("1M");
   const [activeTab, setActiveTab] = useState<"Price" | "Funding">("Price");
-  const [summary, setSummary] = useState({
-    open: 0,
-    high: 0,
-    low: 0,
-    close: 0,
-    volumePct: 0.02,
-    amplitudePct: 0.33,
-  });
+
+  const chartData = useMemo(() => {
+    const { candles, volume } = generateCandleData(
+      BASE_PRICE,
+      CANDLE_COUNT,
+      INTERVAL_MIN[timeframe]
+    );
+    const s = getOhlcvSummary(candles);
+    return {
+      candles,
+      volume,
+      summary: {
+        ...s,
+        volumePct: 0.02,
+        amplitudePct: s.amplitudePct || 0.33,
+      },
+    };
+  }, [timeframe]);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -52,7 +61,7 @@ export function PriceChart() {
         horzLines: { color: "#1e293b" },
       },
       width: containerRef.current.clientWidth,
-      height: 340,
+      height: Math.max(containerRef.current.clientHeight, 200),
       rightPriceScale: {
         borderColor: "#334155",
         scaleMargins: { top: 0.1, bottom: 0.25 },
@@ -85,22 +94,11 @@ export function PriceChart() {
       borderVisible: false,
     });
 
-    const { candles, volume } = generateCandleData(
-      BASE_PRICE,
-      CANDLE_COUNT,
-      INTERVAL_MIN[timeframe]
-    );
-    candleSeries.setData(candles);
-    volumeSeries.setData(volume);
-
-    const s = getOhlcvSummary(candles);
-    setSummary({
-      ...s,
-      volumePct: 0.02,
-      amplitudePct: s.amplitudePct || 0.33,
-    });
+    candleSeries.setData(chartData.candles);
+    volumeSeries.setData(chartData.volume);
 
     chart.timeScale().fitContent();
+    chart.applyOptions({ attributionLogo: false } as Parameters<IChartApi["applyOptions"]>[0]);
 
     chartRef.current = chart;
     candleSeriesRef.current = candleSeries;
@@ -108,25 +106,32 @@ export function PriceChart() {
 
     const handleResize = () => {
       if (containerRef.current && chartRef.current) {
-        chartRef.current.applyOptions({ width: containerRef.current.clientWidth });
+        const w = containerRef.current.clientWidth;
+        const h = Math.max(containerRef.current.clientHeight, 200);
+        chartRef.current.applyOptions({ width: w, height: h });
       }
     };
+    const ro = new ResizeObserver(handleResize);
+    ro.observe(containerRef.current);
     window.addEventListener("resize", handleResize);
 
     return () => {
+      ro.disconnect();
       window.removeEventListener("resize", handleResize);
       chart.remove();
       chartRef.current = null;
       candleSeriesRef.current = null;
       volumeSeriesRef.current = null;
     };
+  // chartData is derived from timeframe; re-create chart only when timeframe changes
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- chartData.candles/volume omitted on purpose
   }, [timeframe]);
 
   const formatPrice = (p: number) => p.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const utcTime = new Date().toISOString().slice(11, 19) + " UTC";
 
   return (
-    <div className="flex flex-1 flex-col">
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
       {/* Top controls */}
       <div className="flex items-center justify-between gap-2 border-b border-slate-700/50 py-1.5">
         <div className="flex items-center gap-1">
@@ -198,16 +203,16 @@ export function PriceChart() {
 
       {/* Data bar */}
       <div className="flex flex-wrap items-center gap-4 border-b border-slate-700/50 px-2 py-1.5 text-xs text-slate-400">
-        <span><strong className="text-slate-300">Open:</strong> {formatPrice(summary.open)}</span>
-        <span><strong className="text-slate-300">High:</strong> {formatPrice(summary.high)}</span>
-        <span><strong className="text-slate-300">Low:</strong> {formatPrice(summary.low)}</span>
-        <span><strong className="text-slate-300">Close:</strong> {formatPrice(summary.close)}</span>
-        <span><strong className="text-slate-300">Volume:</strong> {summary.volumePct}%</span>
-        <span><strong className="text-slate-300">Amplitude:</strong> {summary.amplitudePct.toFixed(2)}%</span>
+        <span><strong className="text-slate-300">Open:</strong> {formatPrice(chartData.summary.open)}</span>
+        <span><strong className="text-slate-300">High:</strong> {formatPrice(chartData.summary.high)}</span>
+        <span><strong className="text-slate-300">Low:</strong> {formatPrice(chartData.summary.low)}</span>
+        <span><strong className="text-slate-300">Close:</strong> {formatPrice(chartData.summary.close)}</span>
+        <span><strong className="text-slate-300">Volume:</strong> {chartData.summary.volumePct}%</span>
+        <span><strong className="text-slate-300">Amplitude:</strong> {chartData.summary.amplitudePct.toFixed(2)}%</span>
       </div>
 
-      {/* Chart */}
-      <div ref={containerRef} className="min-h-[340px] w-full" />
+      {/* Chart - fills remaining height */}
+      <div ref={containerRef} className="min-h-0 flex-1 w-full" />
 
       {/* Bottom bar */}
       <div className="flex items-center justify-between border-t border-slate-700/50 px-2 py-1 text-xs text-slate-500">
