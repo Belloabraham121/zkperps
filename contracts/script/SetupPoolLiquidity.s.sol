@@ -2,10 +2,11 @@
 pragma solidity ^0.8.26;
 
 import "forge-std/Script.sol";
+import "forge-std/console.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {IPositionManager} from "v4-periphery/src/interfaces/IPositionManager.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
-import {PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
+import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 import {Actions} from "v4-periphery/src/libraries/Actions.sol";
@@ -15,28 +16,42 @@ import {LiquidityAmounts} from "@uniswap/v4-core/test/utils/LiquidityAmounts.sol
 import {IERC20} from "forge-std/interfaces/IERC20.sol";
 import {IAllowanceTransfer} from "permit2/src/interfaces/IAllowanceTransfer.sol";
 
+/**
+ * @title SetupPoolLiquidity
+ * @notice Initialize a V4 pool (with your hook) and add liquidity. Use for perp execution.
+ * @dev Reads addresses from env; defaults match Uniswap V4 deployment below.
+ *
+ * Uniswap V4 deployment (this script uses PoolManager, PositionManager, Permit2):
+ *   PoolManager           0xFB3e0C6F74eB1a21CC1Da29aeC80D2Dfe6C9a317
+ *   Universal Router     0xefd1d4bd4cf1e86da286bb4cb1b8bced9c10ba47
+ *   PositionManager      0xAc631556d3d4019C95769033B5E719dD77124BAc
+ *   StateView            0x9d467fa9062b6e9b1a46e26007ad82db116c67cb
+ *   Quoter               0x7de51022d70a725b508085468052e25e22b5c4c9
+ *   PoolSwapTest         0xf3a39c86dbd13c45365e57fb90fe413371f65af8
+ *   PoolModifyLiquidityTest  0x9a8ca723f5dccb7926d00b71dec55c2fea1f50f7
+ *   Permit2              0x000000000022D473030F116dDEE9F6B43aC78BA3
+ *
+ * Env (required for your deployment):
+ *   PRIVATE_KEY         - deployer
+ *   MOCK_USDC           - MockUSDC address (from Deploy.s.sol)
+ *   MOCK_USDT           - MockUSDT address (from Deploy.s.sol)
+ *   HOOK                - PrivBatchHook address (from Deploy.s.sol)
+ *
+ * Env (optional; defaults = above):
+ *   POOL_MANAGER        - default PoolManager above
+ *   POSITION_MANAGER    - default PositionManager above
+ *
+ * After running, use the printed POOL_ID when adding a market (AddMarket with POOL_ID= that value).
+ * Currency order: currency0 < currency1 by address (script uses USDT=0, USDC=1).
+ */
 contract SetupPoolLiquidity is Script {
     using PoolIdLibrary for PoolKey;
-    
-    // Base Sepolia addresses
-    address constant POOL_MANAGER = 0x05E73354cFDd6745C338b50BcFDfA3Aa6fA03408;
-    address constant POSITION_MANAGER = 0x4B2C77d209D3405F41a037Ec6c77F7F5b8e2ca80;
+
     address constant PERMIT2 = 0x000000000022D473030F116dDEE9F6B43aC78BA3;
-    
-    // Mock token addresses
-    // IMPORTANT: currency0 must be < currency1 in Uniswap V4
-    // USDT (0x0Ea...) < USDC (0x983...) so: currency0 = USDT, currency1 = USDC
-    address constant MOCK_USDT = 0x0Ea67A670a4182Db6eB18A6aAbC0f75195ef2EfC; // MockUSDT (18 decimals)
-    address constant MOCK_USDC = 0x98346718c549Ed525201fC583796eCf2eaCC0aD5; // MockUSDC (6 decimals)
-    
-    // Pool parameters
-    uint24 constant FEE = 3000; // 0.3%
+    uint24 constant FEE = 3000;
     int24 constant TICK_SPACING = 60;
-    address constant HOOK = 0x2EEeC56B3037EC07cf2024a896C9708Bc94280C4;
-    
-    // Liquidity amounts — currency0 = USDT (18 dec), currency1 = USDC (6 dec)
-    uint256 constant AMOUNT0_DESIRED = 102 * 10**17; // 10.2 USDT (18 decimals) — currency0
-    uint256 constant AMOUNT1_DESIRED = 10 * 10**6;   // 10 USDC (6 decimals) — currency1
+    uint256 constant AMOUNT0_DESIRED = 102 * 10**17;
+    uint256 constant AMOUNT1_DESIRED = 10 * 10**6;
     // forge-lint: disable-next-line(unsafe-typecast)
     uint128 constant AMOUNT0_MIN = uint128(AMOUNT0_DESIRED * 95 / 100);
     // forge-lint: disable-next-line(unsafe-typecast)
@@ -46,28 +61,36 @@ contract SetupPoolLiquidity is Script {
         uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
         address deployer = vm.addr(deployerPrivateKey);
 
+        address poolManagerAddr = vm.envOr("POOL_MANAGER", address(0xFB3e0C6F74eB1a21CC1Da29aeC80D2Dfe6C9a317));
+        address positionManagerAddr = vm.envOr("POSITION_MANAGER", address(0xAc631556d3d4019C95769033B5E719dD77124BAc));
+        address mockUsdc = vm.envAddress("MOCK_USDC");
+        address mockUsdt = vm.envAddress("MOCK_USDT");
+        address hook = vm.envAddress("HOOK");
+
+        // currency0 must be < currency1
+        (address currency0, address currency1) = mockUsdt < mockUsdc ? (mockUsdt, mockUsdc) : (mockUsdc, mockUsdt);
+
         console.log("Setting up pool and adding liquidity...");
         console.log("Deployer:", deployer);
-        console.log("PoolManager:", POOL_MANAGER);
-        console.log("PositionManager:", POSITION_MANAGER);
-        console.log("Currency0 (USDT):", MOCK_USDT);
-        console.log("Currency1 (USDC):", MOCK_USDC);
-        console.log("Hook:", HOOK);
+        console.log("PoolManager:", poolManagerAddr);
+        console.log("PositionManager:", positionManagerAddr);
+        console.log("Currency0:", currency0);
+        console.log("Currency1:", currency1);
+        console.log("Hook:", hook);
 
         vm.startBroadcast(deployerPrivateKey);
 
-        IPoolManager poolManager = IPoolManager(POOL_MANAGER);
-        IPositionManager positionManager = IPositionManager(POSITION_MANAGER);
-        
-        // Create pool key — currency0 must be < currency1
-        // USDT (0x0Ea...) < USDC (0x983...) ✓
+        IPoolManager poolManager = IPoolManager(poolManagerAddr);
+        IPositionManager positionManager = IPositionManager(positionManagerAddr);
+
         PoolKey memory poolKey = PoolKey({
-            currency0: Currency.wrap(MOCK_USDT),
-            currency1: Currency.wrap(MOCK_USDC),
+            currency0: Currency.wrap(currency0),
+            currency1: Currency.wrap(currency1),
             fee: FEE,
             tickSpacing: TICK_SPACING,
-            hooks: IHooks(HOOK)
+            hooks: IHooks(hook)
         });
+        PoolId poolId = poolKey.toId();
 
         // Step 1: Initialize pool (if not already initialized)
         console.log("\n=== Step 1: Initializing Pool ===");
@@ -86,31 +109,22 @@ contract SetupPoolLiquidity is Script {
 
         // Step 2: Approve tokens via Permit2
         console.log("\n=== Step 2: Approving Tokens via Permit2 ===");
-        IERC20 usdt = IERC20(MOCK_USDT);
-        IERC20 usdc = IERC20(MOCK_USDC);
+        IERC20 token0 = IERC20(currency0);
+        IERC20 token1 = IERC20(currency1);
         IAllowanceTransfer permit2 = IAllowanceTransfer(PERMIT2);
-        
-        // Check balances
-        uint256 usdtBal = usdt.balanceOf(deployer);
-        uint256 usdcBal = usdc.balanceOf(deployer);
-        console.log("USDT balance (currency0):", usdtBal);
-        console.log("USDC balance (currency1):", usdcBal);
-        require(usdtBal >= AMOUNT0_DESIRED, "Insufficient USDT balance");
-        require(usdcBal >= AMOUNT1_DESIRED, "Insufficient USDC balance");
 
-        // Step 2a: Approve both tokens to Permit2
-        usdt.approve(PERMIT2, type(uint256).max);
-        console.log("USDT approved to Permit2");
-        
-        usdc.approve(PERMIT2, type(uint256).max);
-        console.log("USDC approved to Permit2");
-        
-        // Step 2b: Approve PositionManager as spender in Permit2
-        permit2.approve(MOCK_USDT, POSITION_MANAGER, type(uint160).max, type(uint48).max);
-        console.log("PositionManager approved for USDT in Permit2");
-        
-        permit2.approve(MOCK_USDC, POSITION_MANAGER, type(uint160).max, type(uint48).max);
-        console.log("PositionManager approved for USDC in Permit2");
+        uint256 bal0 = token0.balanceOf(deployer);
+        uint256 bal1 = token1.balanceOf(deployer);
+        console.log("Currency0 balance:", bal0);
+        console.log("Currency1 balance:", bal1);
+        require(bal0 >= AMOUNT0_DESIRED, "Insufficient currency0 balance");
+        require(bal1 >= AMOUNT1_DESIRED, "Insufficient currency1 balance");
+
+        token0.approve(PERMIT2, type(uint256).max);
+        token1.approve(PERMIT2, type(uint256).max);
+        permit2.approve(currency0, positionManagerAddr, type(uint160).max, type(uint48).max);
+        permit2.approve(currency1, positionManagerAddr, type(uint160).max, type(uint48).max);
+        console.log("Tokens approved to Permit2 and PositionManager");
 
         // Step 3: Calculate liquidity
         console.log("\n=== Step 3: Calculating Liquidity ===");
@@ -170,11 +184,12 @@ contract SetupPoolLiquidity is Script {
 
         console.log("\n=== Setup Complete ===");
         console.log("Pool initialized and liquidity added");
-        console.log("Pool Key:");
-        console.log("  Currency0 (USDT):", MOCK_USDT);
-        console.log("  Currency1 (USDC):", MOCK_USDC);
-        console.log("  Fee:", FEE);
-        console.log("  Tick Spacing:", TICK_SPACING);
-        console.log("  Hooks:", HOOK);
+        console.log("Use this POOL_ID when adding a market (AddMarket.s.sol):");
+        console.logBytes32(PoolId.unwrap(poolId));
+        console.log("Pool key: currency0=", currency0);
+        console.log("         currency1=", currency1);
+        console.log("         fee=", FEE);
+        console.log("         tickSpacing=", TICK_SPACING);
+        console.log("         hook=", hook);
     }
 }
