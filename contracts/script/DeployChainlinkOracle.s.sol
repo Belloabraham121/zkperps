@@ -22,7 +22,7 @@ import {ChainlinkOracleAdapter} from "../ChainlinkOracleAdapter.sol";
  *   export PERP_MANAGER_ADDRESS=0x...
  *   export ORACLE_ADDRESS=<deployed ChainlinkOracleAdapter address>
  *   export MARKET_ID=0x0000000000000000000000000000000000000001
- *   export POOL_ID=0x$(cast keccak "ETH/USDC")
+ *   export POOL_ID=$(cast keccak "ETH/USDC")
  *   forge script script/AddMarket.s.sol:AddMarket --rpc-url arbitrum_one --broadcast
  */
 contract DeployChainlinkOracle is Script {
