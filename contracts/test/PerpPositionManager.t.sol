@@ -82,6 +82,7 @@ contract PerpPositionManagerTest is Test {
         manager.openPosition(user1, MARKET_ETH, SIZE, true, LEVERAGE, ENTRY_PRICE);
 
         (int256 size,, uint256 collateral,,,) = manager.getPosition(user1, MARKET_ETH);
+        // forge-lint: disable-next-line(unsafe-typecast)
         assertEq(size, int256(SIZE));
         assertEq(collateral, marginRequired);
 
@@ -144,7 +145,8 @@ contract PerpPositionManagerTest is Test {
         manager.applyFunding(MARKET_ETH, 0.01e18);
         int256 payment = manager.getFundingPayment(user1, MARKET_ETH);
         assertGt(payment, 0); // long pays
-        assertEq(payment, int256((SIZE * ENTRY_PRICE / 1e18) * 0.01e18 / 1e18)); // notional * 0.01
+        // Multiply before divide to avoid precision loss; notional * 0.01
+        assertEq(payment, int256((SIZE * ENTRY_PRICE * 0.01e18) / (1e18 * 1e18)));
 
         uint256 nextTime = manager.getNextFundingTime(MARKET_ETH);
         assertGt(nextTime, block.timestamp);
@@ -248,6 +250,7 @@ contract PerpPositionManagerTest is Test {
         manager.openPosition(user1, MARKET_ETH, SIZE, true, LEVERAGE, ENTRY_PRICE);
         manager.closePosition(user1, MARKET_ETH, SIZE / 2, ENTRY_PRICE); // close half
         (int256 size,,,,,) = manager.getPosition(user1, MARKET_ETH);
+        // forge-lint: disable-next-line(unsafe-typecast)
         assertEq(size, int256(SIZE / 2));
     }
 }

@@ -3,9 +3,6 @@ pragma solidity ^0.8.26;
 
 import "forge-std/Script.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
-import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
-import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
-import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
 import {PrivBatchHook} from "../PrivBatchHook.sol";
 import {HookMiner} from "v4-periphery/src/utils/HookMiner.sol";
@@ -18,7 +15,7 @@ contract DeployPrivBatchHook is Script {
     // Base Sepolia PoolManager address
     address constant POOLMANAGER = 0x05E73354cFDd6745C338b50BcFDfA3Aa6fA03408;
     
-    // Base Sepolia deployed verifier address (from previous deployment)
+    // Base Sepolia deployed verifier address (fallback when VERIFIER_ADDRESS not set)
     address constant DEPLOYED_VERIFIER = 0x09F3bCe3546C3b4348E31B6E86A271c42b39672e;
 
     function run() external {
@@ -31,9 +28,8 @@ contract DeployPrivBatchHook is Script {
 
         vm.startBroadcast(deployerPrivateKey);
 
-        // Step 1: Use existing deployed verifier address
-        // The verifier is already deployed, we just pass its address to the hook
-        address verifierAddress = DEPLOYED_VERIFIER;
+        // Step 1: Verifier address from env VERIFIER_ADDRESS, or fallback to Base Sepolia deployed
+        address verifierAddress = vm.envOr("VERIFIER_ADDRESS", DEPLOYED_VERIFIER);
         Groth16Verifier verifier = Groth16Verifier(verifierAddress);
         
         console.log("\n=== Using Deployed Verifier ===");

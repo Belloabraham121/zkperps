@@ -262,7 +262,9 @@ contract PerpBatchExecutionTest is Test {
 
         (int256 size1,,,,,) = perpManager.getPosition(user1, MARKET_ETH);
         (int256 size2,,,,,) = perpManager.getPosition(user2, MARKET_ETH);
+        // forge-lint: disable-next-line(unsafe-typecast)
         assertEq(size1, int256(SIZE));
+        // forge-lint: disable-next-line(unsafe-typecast)
         assertEq(size2, int256(SIZE));
     }
 

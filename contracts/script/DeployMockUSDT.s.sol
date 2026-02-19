@@ -14,23 +14,20 @@ contract DeployMockUSDT is Script {
 
         vm.startBroadcast(deployerPrivateKey);
 
-        // Deploy MockUSDT
-        MockUSDT mockUSDT = new MockUSDT();
-        console.log("MockUSDT deployed at:", address(mockUSDT));
+        MockUSDT mockUsdt = new MockUSDT();
+        console.log("MockUSDT deployed at:", address(mockUsdt));
 
-        // Mint 1000 USDT to deployer (1000 * 10^18)
         uint256 mintAmount = 1000 * 10**18; // 1000 tokens with 18 decimals
-        mockUSDT.mintWei(deployer, mintAmount);
+        mockUsdt.mintWei(deployer, mintAmount);
         console.log("Minted 1000 USDT to", deployer);
 
-        // Check balance
-        uint256 balance = mockUSDT.balanceOf(deployer);
+        uint256 balance = mockUsdt.balanceOf(deployer);
         console.log("Deployer balance:", balance / 10**18, "USDT");
 
         vm.stopBroadcast();
 
         console.log("\n=== Deployment Summary ===");
-        console.log("MockUSDT:", address(mockUSDT));
+        console.log("MockUSDT:", address(mockUsdt));
         console.log("Symbol: mUSDT");
         console.log("Decimals: 18");
         console.log("Deployer balance:", balance / 10**18, "USDT");

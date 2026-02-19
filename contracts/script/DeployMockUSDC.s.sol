@@ -14,23 +14,20 @@ contract DeployMockUSDC is Script {
 
         vm.startBroadcast(deployerPrivateKey);
 
-        // Deploy MockUSDC
-        MockUSDC mockUSDC = new MockUSDC();
-        console.log("MockUSDC deployed at:", address(mockUSDC));
+        MockUSDC mockUsdc = new MockUSDC();
+        console.log("MockUSDC deployed at:", address(mockUsdc));
 
-        // Mint 1000 USDC to deployer (1000 * 10^6)
         uint256 mintAmount = 1000 * 10**6; // 1000 tokens with 6 decimals
-        mockUSDC.mintWei(deployer, mintAmount);
+        mockUsdc.mintWei(deployer, mintAmount);
         console.log("Minted 1000 USDC to", deployer);
 
-        // Check balance
-        uint256 balance = mockUSDC.balanceOf(deployer);
+        uint256 balance = mockUsdc.balanceOf(deployer);
         console.log("Deployer balance:", balance / 10**6, "USDC");
 
         vm.stopBroadcast();
 
         console.log("\n=== Deployment Summary ===");
-        console.log("MockUSDC:", address(mockUSDC));
+        console.log("MockUSDC:", address(mockUsdc));
         console.log("Symbol: mUSDC");
         console.log("Decimals: 6");
         console.log("Deployer balance:", balance / 10**6, "USDC");

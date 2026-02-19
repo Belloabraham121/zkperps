@@ -5,8 +5,8 @@ import "forge-std/Script.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {IPositionManager} from "v4-periphery/src/interfaces/IPositionManager.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
-import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
-import {Currency, CurrencyLibrary} from "@uniswap/v4-core/src/types/Currency.sol";
+import {PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
+import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 import {Actions} from "v4-periphery/src/libraries/Actions.sol";
 import {Planner, Plan} from "v4-periphery/test/shared/Planner.sol";
@@ -37,7 +37,9 @@ contract SetupPoolLiquidity is Script {
     // Liquidity amounts — currency0 = USDT (18 dec), currency1 = USDC (6 dec)
     uint256 constant AMOUNT0_DESIRED = 102 * 10**17; // 10.2 USDT (18 decimals) — currency0
     uint256 constant AMOUNT1_DESIRED = 10 * 10**6;   // 10 USDC (6 decimals) — currency1
+    // forge-lint: disable-next-line(unsafe-typecast)
     uint128 constant AMOUNT0_MIN = uint128(AMOUNT0_DESIRED * 95 / 100);
+    // forge-lint: disable-next-line(unsafe-typecast)
     uint128 constant AMOUNT1_MIN = uint128(AMOUNT1_DESIRED * 95 / 100);
 
     function run() external {
@@ -74,6 +76,7 @@ contract SetupPoolLiquidity is Script {
             console.log("Pool initialized, tick:", tick);
         } catch (bytes memory reason) {
             // Check if error is PoolAlreadyInitialized (0x7983c051)
+            // forge-lint: disable-next-line(unsafe-typecast)
             if (reason.length >= 4 && bytes4(reason) == bytes4(0x7983c051)) {
                 console.log("Pool already initialized, skipping...");
             } else {
@@ -117,13 +120,13 @@ contract SetupPoolLiquidity is Script {
         // Use initial price (2^96 = 1:1 price) - pool was initialized with this
         uint160 initialSqrtPriceX96 = uint160(79228162514264337593543950336);
         
-        uint160 sqrtPriceAX96 = TickMath.getSqrtPriceAtTick(tickLower);
-        uint160 sqrtPriceBX96 = TickMath.getSqrtPriceAtTick(tickUpper);
+        uint160 sqrtPriceAx96 = TickMath.getSqrtPriceAtTick(tickLower);
+        uint160 sqrtPriceBx96 = TickMath.getSqrtPriceAtTick(tickUpper);
         
         uint128 liquidity = LiquidityAmounts.getLiquidityForAmounts(
             initialSqrtPriceX96,
-            sqrtPriceAX96,
-            sqrtPriceBX96,
+            sqrtPriceAx96,
+            sqrtPriceBx96,
             AMOUNT0_DESIRED,
             AMOUNT1_DESIRED
         );
@@ -145,7 +148,9 @@ contract SetupPoolLiquidity is Script {
                 tickLower,
                 tickUpper,
                 liquidity,
+                // forge-lint: disable-next-line(unsafe-typecast)
                 uint128(AMOUNT0_DESIRED), // amount0Max
+                // forge-lint: disable-next-line(unsafe-typecast)
                 uint128(AMOUNT1_DESIRED), // amount1Max
                 deployer, // recipient
                 "" // hookData

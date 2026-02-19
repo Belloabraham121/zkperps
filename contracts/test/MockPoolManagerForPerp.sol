@@ -35,6 +35,7 @@ contract MockPoolManagerForPerp is IPoolManager {
         returns (BalanceDelta)
     {
         // Return delta so execution price = quoteAbs * 1e18 / baseAbs = 2800e18
+        // forge-lint: disable-next-line(unsafe-typecast)
         return toBalanceDelta(int128(int256(MOCK_BASE_DELTA)), -int128(int256(MOCK_QUOTE_DELTA)));
     }
 
