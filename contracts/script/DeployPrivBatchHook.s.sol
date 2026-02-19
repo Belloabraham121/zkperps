@@ -12,11 +12,11 @@ contract DeployPrivBatchHook is Script {
     // CREATE2 Deployer Proxy (used by Forge for deterministic deployments)
     address constant CREATE2_DEPLOYER = address(0x4e59b44847b379578588920cA78FbF26c0B4956C);
     
-    // Base Sepolia PoolManager address
-    address constant POOLMANAGER = 0x05E73354cFDd6745C338b50BcFDfA3Aa6fA03408;
+    // Arbitrum Sepolia PoolManager address
+    address constant POOLMANAGER = 0xFB3e0C6F74eB1a21CC1Da29aeC80D2Dfe6C9a317;
     
-    // Base Sepolia deployed verifier address (fallback when VERIFIER_ADDRESS not set)
-    address constant DEPLOYED_VERIFIER = 0x09F3bCe3546C3b4348E31B6E86A271c42b39672e;
+    // Arbitrum Sepolia deployed verifier address (fallback when VERIFIER_ADDRESS not set)
+    address constant DEPLOYED_VERIFIER = 0x7FE24E07A4017B953259a79a9EE635e8eb226c11;
 
     function run() external {
         uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
@@ -28,7 +28,7 @@ contract DeployPrivBatchHook is Script {
 
         vm.startBroadcast(deployerPrivateKey);
 
-        // Step 1: Verifier address from env VERIFIER_ADDRESS, or fallback to Base Sepolia deployed
+        // Step 1: Verifier address from env VERIFIER_ADDRESS, or fallback to Arbitrum Sepolia deployed
         address verifierAddress = vm.envOr("VERIFIER_ADDRESS", DEPLOYED_VERIFIER);
         Groth16Verifier verifier = Groth16Verifier(verifierAddress);
         

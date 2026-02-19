@@ -1209,7 +1209,36 @@ contract PrivBatchHook is BaseHook, IUnlockCallback {
         uint256 absBase = uint256(netBase > 0 ? netBase : -netBase);
         if (absBase == 0) return abi.encode(uint256(0));
 
-        uint160 priceLimit = zeroForOne ? TickMath.MIN_SQRT_PRICE + 1 : TickMath.MAX_SQRT_PRICE - 1;
+        // Get current pool price to set limit relative to it (ensures limit is always valid)
+        PoolId poolId = cb.key.toId();
+        (uint160 currentSqrtPriceX96,,,) = poolManager.getSlot0(poolId);
+        
+        // Set price limit relative to current price with a large buffer to avoid PriceLimitAlreadyExceeded
+        // For zeroForOne (price decreases): limit must be < current price, use current * 0.5 (50% decrease allowed)
+        // For oneForZero (price increases): limit must be > current price, use current * 2.0 (100% increase allowed)
+        // Ensure limits stay within valid bounds (MIN_SQRT_PRICE < limit < MAX_SQRT_PRICE)
+        uint160 priceLimit;
+        if (zeroForOne) {
+            // Price decreases: limit = current * 0.5, but ensure it's > MIN_SQRT_PRICE
+            // Using bit shift for division by 2 (multiply by 0.5)
+            uint160 halfPrice = uint160(uint256(currentSqrtPriceX96) / 2);
+            priceLimit = halfPrice > TickMath.MIN_SQRT_PRICE + 1 
+                ? halfPrice 
+                : TickMath.MIN_SQRT_PRICE + 1;
+        } else {
+            // Price increases: limit = current * 2.0, but ensure it's < MAX_SQRT_PRICE
+            // Check for overflow before multiplying
+            uint160 doublePrice;
+            if (currentSqrtPriceX96 <= type(uint160).max / 2) {
+                doublePrice = uint160(uint256(currentSqrtPriceX96) * 2);
+            } else {
+                doublePrice = TickMath.MAX_SQRT_PRICE - 1;
+            }
+            priceLimit = doublePrice < TickMath.MAX_SQRT_PRICE 
+                ? doublePrice 
+                : TickMath.MAX_SQRT_PRICE - 1;
+        }
+        
         // amountSpecified: negative = exact input, positive = exact output (in V4)
         int256 amountSpecified = netBase > 0 ? int256(absBase) : -int256(absBase);
 

@@ -23,13 +23,16 @@ import {IAllowanceTransfer} from "permit2/src/interfaces/IAllowanceTransfer.sol"
  *
  * Uniswap V4 deployment (this script uses PoolManager, PositionManager, Permit2):
  *   PoolManager           0xFB3e0C6F74eB1a21CC1Da29aeC80D2Dfe6C9a317
- *   Universal Router     0xefd1d4bd4cf1e86da286bb4cb1b8bced9c10ba47
- *   PositionManager      0xAc631556d3d4019C95769033B5E719dD77124BAc
- *   StateView            0x9d467fa9062b6e9b1a46e26007ad82db116c67cb
- *   Quoter               0x7de51022d70a725b508085468052e25e22b5c4c9
- *   PoolSwapTest         0xf3a39c86dbd13c45365e57fb90fe413371f65af8
- *   PoolModifyLiquidityTest  0x9a8ca723f5dccb7926d00b71dec55c2fea1f50f7
- *   Permit2              0x000000000022D473030F116dDEE9F6B43aC78BA3
+ *   Universal Router      0xefd1d4bd4cf1e86da286bb4cb1b8bced9c10ba47
+ *   PositionManager       0xAc631556d3d4019C95769033B5E719dD77124BAc
+ *   StateView             0x9d467fa9062b6e9b1a46e26007ad82db116c67cb
+ *   Quoter                0x7de51022d70a725b508085468052e25e22b5c4c9
+ *   PoolSwapTest          0xf3a39c86dbd13c45365e57fb90fe413371f65af8
+ *   PoolModifyLiquidityTest 0x9a8ca723f5dccb7926d00b71dec55c2fea1f50f7
+ *   Permit2               0x000000000022D473030F116dDEE9F6B43aC78BA3
+ *   
+ * PrivBatchHook (set via HOOK env var):
+ *   PrivBatchHook         0xe3ea87fb759c3206a9595048732eb6a6000700c4
  *
  * Env (required for your deployment):
  *   PRIVATE_KEY         - deployer
