@@ -15,8 +15,8 @@ export function TradeLayout() {
       <NavbarBox />
       <MarketInfoBarBox />
       <div className="flex min-h-0 flex-1 overflow-hidden">
-        {/* Left section: chart + depth, then positions (same section as chart data) */}
-        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        {/* Left section: chart + depth flush above positions, no gap */}
+        <div className="flex min-h-0 flex-1 flex-col gap-0 overflow-hidden">
           <ChartBox />
           <PositionsPanelBox />
         </div>

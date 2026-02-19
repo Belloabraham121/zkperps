@@ -211,8 +211,8 @@ export function PriceChart() {
         <span><strong className="text-slate-300">Amplitude:</strong> {chartData.summary.amplitudePct.toFixed(2)}%</span>
       </div>
 
-      {/* Chart - fills remaining height */}
-      <div ref={containerRef} className="min-h-0 flex-1 w-full" />
+      {/* Chart - fills remaining height, no gap below */}
+      <div ref={containerRef} className="min-h-0 w-full flex-1 self-stretch" />
 
       {/* Bottom bar */}
       <div className="flex items-center justify-between border-t border-slate-700/50 px-2 py-1 text-xs text-slate-500">
