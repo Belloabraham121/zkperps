@@ -704,6 +704,7 @@ async function main() {
       "0x2d4e4f9d": "InvalidNonce",
       "0x8c2e2b3a": "InsufficientCommitments",
       "0x4e8e5c5c": "BatchConditionsNotMet",
+      "0x7fb6be02": "OnlyExecutor",
     };
     
     const decodedError = errorMap[errorSelector] || "UnknownError";
@@ -724,6 +725,7 @@ async function main() {
       isDeadlineExpired: e.data && e.data.startsWith("0x1f2a2005"),
       isInvalidNonce: e.data && e.data.startsWith("0x2d4e4f9d"),
       isInsufficientCommitments: e.data && e.data.startsWith("0x8c2e2b3a"),
+      isOnlyExecutor: e.data && e.data.startsWith("0x7fb6be02"),
       poolId: poolId,
       commitmentHashesCount: commitmentHashes.length,
       baseIsCurrency0: BASE_IS_CURRENCY0,
@@ -779,6 +781,9 @@ async function main() {
         console.error("  Error: InvalidNonce - Nonce already used");
       } else if (e.data.startsWith("0x8c2e2b3a")) {
         console.error("  Error: InsufficientCommitments - Need at least 2 commitments");
+      } else if (e.data.startsWith("0x7fb6be02")) {
+        console.error("  Error: OnlyExecutor - Hook is not set as executor on PerpPositionManager");
+        console.error("  Run: cd contracts && source .env && export PERP_POSITION_MANAGER=0xf3c9cdbaf6dc303fe302fbf81465de0a057ccf5e && forge script script/SetExecutorOnPerpManager.s.sol:SetExecutorOnPerpManager --rpc-url arbitrum_sepolia --broadcast");
       }
     }
     process.exit(1);
