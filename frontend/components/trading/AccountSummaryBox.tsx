@@ -32,13 +32,13 @@ export function AccountSummaryBox() {
     n.toLocaleString("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
   return (
-    <aside className="flex w-80 shrink-0 flex-col bg-neutral-900/50 p-3">
+    <aside className="flex w-80 shrink-0 flex-col bg-[#21262e] p-3">
       <div className="mb-2 flex items-center justify-between">
-        <span className="text-xs font-medium text-neutral-400">{accountLabel}</span>
+        <span className="text-xs font-medium text-[#7d8590]">{accountLabel}</span>
         <button
           type="button"
           onClick={handleDeposit}
-          className="rounded border border-neutral-600 bg-neutral-800/80 px-2 py-1 text-xs font-medium text-neutral-200 hover:bg-neutral-700"
+          className="bg-[#2a303c] px-2 py-1 text-xs font-medium text-[#c8cdd4] hover:bg-[#363d4a]"
         >
           Deposit
         </button>
@@ -46,60 +46,60 @@ export function AccountSummaryBox() {
 
       <div className="flex flex-col gap-2 text-xs">
         <div className="flex justify-between">
-          <span className="text-neutral-500">Equity</span>
-          <span className="text-neutral-200">{formatUsd(equity)}</span>
+          <span className="text-[#7d8590]">Equity</span>
+          <span className="text-[#c8cdd4]">{formatUsd(equity)}</span>
         </div>
         <div className="flex justify-between">
-          <span className="text-neutral-500">Available Balance</span>
-          <span className="text-neutral-200">{formatUsd(availableBalance)}</span>
+          <span className="text-[#7d8590]">Available Balance</span>
+          <span className="text-[#c8cdd4]">{formatUsd(availableBalance)}</span>
         </div>
         <div className="flex justify-between">
-          <span className="text-neutral-500">Margin Health</span>
-          <span className="text-neutral-200">{formatUsd(usedMargin)}</span>
+          <span className="text-[#7d8590]">Margin Health</span>
+          <span className="text-[#c8cdd4]">{formatUsd(usedMargin)}</span>
         </div>
         <div className="flex justify-between">
-          <span className="text-neutral-500">Maintenance Margin</span>
-          <span className="text-neutral-200">{formatUsd(maintenanceMargin)}</span>
+          <span className="text-[#7d8590]">Maintenance Margin</span>
+          <span className="text-[#c8cdd4]">{formatUsd(maintenanceMargin)}</span>
         </div>
         <div className="flex justify-between">
-          <span className="text-neutral-500">Cross Account Leverage</span>
-          <span className="text-neutral-200">{crossLeverage}</span>
+          <span className="text-[#7d8590]">Cross Account Leverage</span>
+          <span className="text-[#c8cdd4]">{crossLeverage}</span>
         </div>
         <div className="flex justify-between">
-          <span className="text-neutral-500">Total Account Leverage</span>
-          <span className="text-neutral-200">{totalLeverage}</span>
+          <span className="text-[#7d8590]">Total Account Leverage</span>
+          <span className="text-[#c8cdd4]">{totalLeverage}</span>
         </div>
       </div>
 
       {/* Plan: Total collateral, Available margin, Used margin */}
-      <div className="mt-3 border-t border-neutral-700 pt-3">
-        <div className="mb-2 text-xs font-medium text-neutral-400">Collateral Overview</div>
+      <div className="mt-3 border-t border-[#363d4a] pt-3">
+        <div className="mb-2 text-xs font-medium text-[#7d8590]">Collateral Overview</div>
         <div className="flex flex-col gap-1.5 text-xs">
           <div className="flex justify-between">
-            <span className="text-neutral-500">Total collateral deposited</span>
-            <span className="text-neutral-200">{formatUsd(totalCollateral)}</span>
+            <span className="text-[#7d8590]">Total collateral deposited</span>
+            <span className="text-[#c8cdd4]">{formatUsd(totalCollateral)}</span>
           </div>
           <div className="flex justify-between">
-            <span className="text-neutral-500">Available margin</span>
-            <span className="text-neutral-200">{formatUsd(availableBalance)}</span>
+            <span className="text-[#7d8590]">Available margin</span>
+            <span className="text-[#c8cdd4]">{formatUsd(availableBalance)}</span>
           </div>
           <div className="flex justify-between">
-            <span className="text-neutral-500">Used margin</span>
-            <span className="text-neutral-200">{formatUsd(usedMargin)}</span>
+            <span className="text-[#7d8590]">Used margin</span>
+            <span className="text-[#c8cdd4]">{formatUsd(usedMargin)}</span>
           </div>
         </div>
         <div className="mt-2 flex gap-2">
           <button
             type="button"
             onClick={handleDeposit}
-            className="flex-1 rounded bg-sky-600 py-1.5 text-xs font-medium text-white hover:bg-sky-500"
+            className="flex-1 bg-[#3d4a5c] py-1.5 text-xs font-medium text-white hover:bg-[#4a5a6d]"
           >
             Deposit
           </button>
           <button
             type="button"
             onClick={handleWithdraw}
-            className="flex-1 rounded border border-neutral-600 py-1.5 text-xs font-medium text-neutral-200 hover:bg-neutral-700"
+            className="flex-1 bg-[#2a303c] py-1.5 text-xs font-medium text-[#c8cdd4] hover:bg-[#363d4a]"
           >
             Withdraw
           </button>

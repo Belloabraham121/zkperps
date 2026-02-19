@@ -64,17 +64,17 @@ export function OrderPanelBox() {
   };
 
   return (
-    <aside className="flex w-80 shrink-0 flex-col border-b border-neutral-700 bg-neutral-900/50 p-3">
+    <aside className="flex w-80 shrink-0 flex-col border-b border-[#363d4a] bg-[#21262e] p-3">
       <form onSubmit={handleOpenPosition} className="flex flex-col gap-3">
-        {/* Order type: Limit | Market | Conditional */}
-        <div className="flex rounded border border-neutral-600 bg-neutral-800/80 p-0.5">
+        {/* Order type: Limit | Market | Conditional - square tabs, no border */}
+        <div className="flex bg-[#2a303c] p-0.5">
           {(["limit", "market", "conditional"] as const).map((t) => (
             <button
               key={t}
               type="button"
               onClick={() => setOrderType(t)}
-              className={`flex-1 rounded px-2 py-1.5 text-xs font-medium capitalize ${
-                orderType === t ? "bg-neutral-600 text-white" : "text-neutral-400 hover:text-neutral-200"
+              className={`flex-1 px-2 py-1.5 text-xs font-medium capitalize ${
+                orderType === t ? "bg-[#3d4a5c] text-white" : "text-[#7d8590] hover:text-[#c8cdd4]"
               }`}
             >
               {t}
@@ -82,15 +82,15 @@ export function OrderPanelBox() {
           ))}
         </div>
 
-        {/* Margin mode: Isolated | Cross */}
-        <div className="flex rounded border border-neutral-600 bg-neutral-800/80 p-0.5">
+        {/* Margin mode: Isolated | Cross - square tabs, no border */}
+        <div className="flex bg-[#2a303c] p-0.5">
           {(["isolated", "cross"] as const).map((m) => (
             <button
               key={m}
               type="button"
               onClick={() => setMarginMode(m)}
-              className={`flex-1 rounded px-2 py-1.5 text-xs font-medium capitalize ${
-                marginMode === m ? "bg-neutral-600 text-white" : "text-neutral-400 hover:text-neutral-200"
+              className={`flex-1 px-2 py-1.5 text-xs font-medium capitalize ${
+                marginMode === m ? "bg-[#3d4a5c] text-white" : "text-[#7d8590] hover:text-[#c8cdd4]"
               }`}
             >
               {m}
@@ -101,31 +101,31 @@ export function OrderPanelBox() {
         {/* Limit: show limit price */}
         {orderType === "limit" && (
           <div>
-            <label className="mb-1 block text-xs text-neutral-400">Limit price</label>
+            <label className="mb-1 block text-xs text-[#7d8590]">Limit price</label>
             <input
               type="text"
               inputMode="decimal"
               placeholder="0.00"
               value={limitPrice}
               onChange={(e) => setLimitPrice(e.target.value)}
-              className={`w-full rounded border bg-neutral-800/80 px-2 py-1.5 text-sm text-neutral-100 placeholder:text-neutral-500 ${
-                errors.limitPrice ? "border-red-500" : "border-neutral-600"
+              className={`w-full border bg-[#2a303c] px-2 py-1.5 text-sm text-[#c8cdd4] placeholder:text-[#7d8590] ${
+                errors.limitPrice ? "border-[#b54a4a]" : "border-[#363d4a]"
               }`}
             />
-            {errors.limitPrice && <p className="mt-0.5 text-xs text-red-400">{errors.limitPrice}</p>}
+            {errors.limitPrice && <p className="mt-0.5 text-xs text-[#b54a4a]">{errors.limitPrice}</p>}
           </div>
         )}
 
-        {/* Conditional: trigger by + trigger price */}
+        {/* Conditional: trigger by + trigger price - square tabs */}
         {orderType === "conditional" && (
-          <div className="space-y-2 rounded border border-neutral-600 bg-neutral-800/50 p-2">
-            <div className="text-xs font-medium text-neutral-400">Trigger</div>
-            <div className="flex rounded border border-neutral-600 bg-neutral-800/80 p-0.5">
+          <div className="space-y-2 border border-[#363d4a] bg-[#2a303c] p-2">
+            <div className="text-xs font-medium text-[#7d8590]">Trigger</div>
+            <div className="flex bg-[#21262e] p-0.5">
               <button
                 type="button"
                 onClick={() => setTriggerBy("mark")}
-                className={`flex-1 rounded px-2 py-1 text-xs capitalize ${
-                  triggerBy === "mark" ? "bg-neutral-600 text-white" : "text-neutral-400 hover:text-neutral-200"
+                className={`flex-1 px-2 py-1 text-xs capitalize ${
+                  triggerBy === "mark" ? "bg-[#3d4a5c] text-white" : "text-[#7d8590] hover:text-[#c8cdd4]"
                 }`}
               >
                 Mark price
@@ -133,26 +133,26 @@ export function OrderPanelBox() {
               <button
                 type="button"
                 onClick={() => setTriggerBy("last")}
-                className={`flex-1 rounded px-2 py-1 text-xs capitalize ${
-                  triggerBy === "last" ? "bg-neutral-600 text-white" : "text-neutral-400 hover:text-neutral-200"
+                className={`flex-1 px-2 py-1 text-xs capitalize ${
+                  triggerBy === "last" ? "bg-[#3d4a5c] text-white" : "text-[#7d8590] hover:text-[#c8cdd4]"
                 }`}
               >
                 Last price
               </button>
             </div>
             <div>
-              <label className="mb-1 block text-xs text-neutral-400">Trigger price</label>
+              <label className="mb-1 block text-xs text-[#7d8590]">Trigger price</label>
               <input
                 type="text"
                 inputMode="decimal"
                 placeholder="0.00"
                 value={triggerPrice}
                 onChange={(e) => setTriggerPrice(e.target.value)}
-                className={`w-full rounded border bg-neutral-800/80 px-2 py-1.5 text-sm text-neutral-100 placeholder:text-neutral-500 ${
-                  errors.triggerPrice ? "border-red-500" : "border-neutral-600"
+                className={`w-full border bg-[#2a303c] px-2 py-1.5 text-sm text-[#c8cdd4] placeholder:text-[#7d8590] ${
+                  errors.triggerPrice ? "border-[#b54a4a]" : "border-[#363d4a]"
                 }`}
               />
-              {errors.triggerPrice && <p className="mt-0.5 text-xs text-red-400">{errors.triggerPrice}</p>}
+              {errors.triggerPrice && <p className="mt-0.5 text-xs text-[#b54a4a]">{errors.triggerPrice}</p>}
             </div>
           </div>
         )}
@@ -160,8 +160,8 @@ export function OrderPanelBox() {
         {/* Leverage: 1x–10x */}
         <div>
           <div className="mb-1 flex items-center justify-between text-xs">
-            <span className="text-neutral-400">Leverage</span>
-            <span className="font-medium text-neutral-200">{leverage}x</span>
+            <span className="text-[#7d8590]">Leverage</span>
+            <span className="font-medium text-[#c8cdd4]">{leverage}x</span>
           </div>
           <input
             type="range"
@@ -169,31 +169,31 @@ export function OrderPanelBox() {
             max={LEVERAGE_MAX}
             value={leverage}
             onChange={(e) => setLeverage(Number(e.target.value))}
-            className="h-2 w-full accent-sky-500"
+            className="h-2 w-full accent-[#5b6b7a]"
           />
         </div>
 
         {/* Size */}
         <div>
-          <label className="mb-1 block text-xs text-neutral-400">Size</label>
+          <label className="mb-1 block text-xs text-[#7d8590]">Size</label>
           <input
             type="text"
             inputMode="decimal"
             placeholder="0.00"
             value={size}
             onChange={(e) => setSize(e.target.value)}
-            className={`w-full rounded border bg-neutral-800/80 px-2 py-1.5 text-sm text-neutral-100 placeholder:text-neutral-500 ${
-              errors.size ? "border-red-500" : "border-neutral-600"
+            className={`w-full border bg-[#2a303c] px-2 py-1.5 text-sm text-[#c8cdd4] placeholder:text-[#7d8590] ${
+              errors.size ? "border-[#b54a4a]" : "border-[#363d4a]"
             }`}
           />
-          {errors.size && <p className="mt-0.5 text-xs text-red-400">{errors.size}</p>}
+          {errors.size && <p className="mt-0.5 text-xs text-[#b54a4a]">{errors.size}</p>}
           <div className="mt-1 flex gap-1">
             {[10, 25, 50, 75, 100].map((pct) => (
               <button
                 key={pct}
                 type="button"
                 onClick={() => setSize("")}
-                className="rounded border border-neutral-600 px-1.5 py-0.5 text-xs text-neutral-400 hover:bg-neutral-700 hover:text-neutral-200"
+                className="px-1.5 py-0.5 text-xs text-[#7d8590] hover:bg-[#363d4a] hover:text-[#c8cdd4]"
               >
                 {pct}%
               </button>
@@ -203,14 +203,14 @@ export function OrderPanelBox() {
 
         {/* Margin (label changes by Isolated / Cross) */}
         <div>
-          <label className="mb-1 block text-xs text-neutral-400">
+          <label className="mb-1 block text-xs text-[#7d8590]">
             Margin {marginMode === "isolated" ? "(Isolated)" : "(Cross)"}
           </label>
           {marginMode === "isolated" && (
-            <p className="mb-1 text-[10px] text-neutral-500">Risk limited to this position’s margin</p>
+            <p className="mb-1 text-[10px] text-[#7d8590]">Risk limited to this position’s margin</p>
           )}
           {marginMode === "cross" && (
-            <p className="mb-1 text-[10px] text-neutral-500">Uses shared account margin</p>
+            <p className="mb-1 text-[10px] text-[#7d8590]">Uses shared account margin</p>
           )}
           <input
             type="text"
@@ -218,11 +218,11 @@ export function OrderPanelBox() {
             placeholder="0.00"
             value={margin}
             onChange={(e) => setMargin(e.target.value)}
-            className={`w-full rounded border bg-neutral-800/80 px-2 py-1.5 text-sm text-neutral-100 placeholder:text-neutral-500 ${
-              errors.margin ? "border-red-500" : "border-neutral-600"
+            className={`w-full border bg-[#2a303c] px-2 py-1.5 text-sm text-[#c8cdd4] placeholder:text-[#7d8590] ${
+              errors.margin ? "border-[#b54a4a]" : "border-[#363d4a]"
             }`}
           />
-          {errors.margin && <p className="mt-0.5 text-xs text-red-400">{errors.margin}</p>}
+          {errors.margin && <p className="mt-0.5 text-xs text-[#b54a4a]">{errors.margin}</p>}
         </div>
 
         {/* Take Profit / Stop Loss (optional) */}
@@ -230,7 +230,7 @@ export function OrderPanelBox() {
           <button
             type="button"
             onClick={() => setShowTpSl(!showTpSl)}
-            className="text-xs text-neutral-400 hover:text-neutral-200"
+            className="text-xs text-[#7d8590] hover:text-[#c8cdd4]"
           >
             {showTpSl ? "−" : "+"} Take Profit / Stop Loss
           </button>
@@ -239,24 +239,24 @@ export function OrderPanelBox() {
               <input
                 type="text"
                 placeholder="TP"
-                className="w-full rounded border border-neutral-600 bg-neutral-800/80 px-2 py-1 text-xs placeholder:text-neutral-500"
+                className="w-full border border-[#363d4a] bg-[#2a303c] px-2 py-1 text-xs text-[#c8cdd4] placeholder:text-[#7d8590]"
               />
               <input
                 type="text"
                 placeholder="SL"
-                className="w-full rounded border border-neutral-600 bg-neutral-800/80 px-2 py-1 text-xs placeholder:text-neutral-500"
+                className="w-full border border-[#363d4a] bg-[#2a303c] px-2 py-1 text-xs text-[#c8cdd4] placeholder:text-[#7d8590]"
               />
             </div>
           )}
         </div>
 
-        {/* Open Long / Open Short */}
+        {/* Open Long / Open Short - square, no border */}
         <div className="flex gap-2">
           <button
             type="submit"
             name="side"
             data-side="long"
-            className="flex-1 rounded bg-green-600 py-2 text-sm font-medium text-white hover:bg-green-500"
+            className="flex-1 bg-[#2d5a4a] py-2 text-sm font-medium text-white hover:bg-[#3d6a5a]"
           >
             Open Long
           </button>
@@ -264,14 +264,14 @@ export function OrderPanelBox() {
             type="submit"
             name="side"
             data-side="short"
-            className="flex-1 rounded bg-red-600 py-2 text-sm font-medium text-white hover:bg-red-500"
+            className="flex-1 bg-[#5a3d3d] py-2 text-sm font-medium text-white hover:bg-[#6a4d4d]"
           >
             Open Short
           </button>
         </div>
 
         {/* Placeholder summary */}
-        <div className="grid grid-cols-2 gap-1 text-xs text-neutral-500">
+        <div className="grid grid-cols-2 gap-1 text-xs text-[#7d8590]">
           <span>Value</span>
           <span className="text-right">—</span>
           <span>Cost</span>

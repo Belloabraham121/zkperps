@@ -132,12 +132,12 @@ export function PriceChart() {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-      {/* Top controls */}
-      <div className="flex items-center justify-between gap-2 border-b border-slate-700/50 py-1.5">
+      {/* Top controls - square buttons, no borders */}
+      <div className="flex items-center justify-between gap-2 border-b border-[#363d4a] py-1.5">
         <div className="flex items-center gap-1">
           <button
             type="button"
-            className="rounded p-1.5 text-slate-400 hover:bg-slate-700/50 hover:text-slate-200"
+            className="p-1.5 text-[#7d8590] hover:bg-[#363d4a] hover:text-[#c8cdd4]"
             title="Drawing tools"
             aria-label="Drawing tools"
           >
@@ -147,7 +147,7 @@ export function PriceChart() {
           </button>
           <button
             type="button"
-            className="rounded p-1.5 text-slate-400 hover:bg-slate-700/50 hover:text-slate-200"
+            className="p-1.5 text-[#7d8590] hover:bg-[#363d4a] hover:text-[#c8cdd4]"
             title="Layout"
             aria-label="Layout"
           >
@@ -155,13 +155,13 @@ export function PriceChart() {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6z" />
             </svg>
           </button>
-          <div className="ml-1 flex rounded bg-slate-800/80">
+          <div className="ml-1 flex bg-[#2a303c] p-0.5">
             {TIMEFRAMES.map((tf) => (
               <button
                 key={tf}
                 type="button"
                 onClick={() => setTimeframe(tf)}
-                className={`px-2 py-1 text-xs font-medium ${timeframe === tf ? "bg-slate-600 text-white" : "text-slate-400 hover:text-slate-200"}`}
+                className={`px-2 py-1 text-xs font-medium ${timeframe === tf ? "bg-[#3d4a5c] text-white" : "text-[#7d8590] hover:text-[#c8cdd4]"}`}
               >
                 {tf}
               </button>
@@ -172,14 +172,14 @@ export function PriceChart() {
           <button
             type="button"
             onClick={() => setActiveTab("Price")}
-            className={`px-2 py-1 text-xs font-medium ${activeTab === "Price" ? "text-sky-400" : "text-slate-400 hover:text-slate-200"}`}
+            className={`px-2 py-1 text-xs font-medium ${activeTab === "Price" ? "text-[#5b6b7a]" : "text-[#7d8590] hover:text-[#c8cdd4]"}`}
           >
             Price
           </button>
           <button
             type="button"
             onClick={() => setActiveTab("Funding")}
-            className={`px-2 py-1 text-xs font-medium ${activeTab === "Funding" ? "text-sky-400" : "text-slate-400 hover:text-slate-200"}`}
+            className={`px-2 py-1 text-xs font-medium ${activeTab === "Funding" ? "text-[#5b6b7a]" : "text-[#7d8590] hover:text-[#c8cdd4]"}`}
           >
             Funding
           </button>
@@ -188,7 +188,7 @@ export function PriceChart() {
               <button
                 key={t}
                 type="button"
-                className="rounded p-1.5 text-slate-400 hover:bg-slate-700/50 hover:text-slate-200"
+                className="p-1.5 text-[#7d8590] hover:bg-[#363d4a] hover:text-[#c8cdd4]"
                 title={t}
                 aria-label={t}
               >
@@ -202,26 +202,26 @@ export function PriceChart() {
       </div>
 
       {/* Data bar */}
-      <div className="flex flex-wrap items-center gap-4 border-b border-slate-700/50 px-2 py-1.5 text-xs text-slate-400">
-        <span><strong className="text-slate-300">Open:</strong> {formatPrice(chartData.summary.open)}</span>
-        <span><strong className="text-slate-300">High:</strong> {formatPrice(chartData.summary.high)}</span>
-        <span><strong className="text-slate-300">Low:</strong> {formatPrice(chartData.summary.low)}</span>
-        <span><strong className="text-slate-300">Close:</strong> {formatPrice(chartData.summary.close)}</span>
-        <span><strong className="text-slate-300">Volume:</strong> {chartData.summary.volumePct}%</span>
-        <span><strong className="text-slate-300">Amplitude:</strong> {chartData.summary.amplitudePct.toFixed(2)}%</span>
+      <div className="flex flex-wrap items-center gap-4 border-b border-[#363d4a] px-2 py-1.5 text-xs text-[#7d8590]">
+        <span><strong className="text-[#c8cdd4]">Open:</strong> {formatPrice(chartData.summary.open)}</span>
+        <span><strong className="text-[#c8cdd4]">High:</strong> {formatPrice(chartData.summary.high)}</span>
+        <span><strong className="text-[#c8cdd4]">Low:</strong> {formatPrice(chartData.summary.low)}</span>
+        <span><strong className="text-[#c8cdd4]">Close:</strong> {formatPrice(chartData.summary.close)}</span>
+        <span><strong className="text-[#c8cdd4]">Volume:</strong> {chartData.summary.volumePct}%</span>
+        <span><strong className="text-[#c8cdd4]">Amplitude:</strong> {chartData.summary.amplitudePct.toFixed(2)}%</span>
       </div>
 
       {/* Chart - fills remaining height, no gap below */}
       <div ref={containerRef} className="min-h-0 w-full flex-1 self-stretch" />
 
       {/* Bottom bar */}
-      <div className="flex items-center justify-between border-t border-slate-700/50 px-2 py-1 text-xs text-slate-500">
+      <div className="flex items-center justify-between border-t border-[#363d4a] px-2 py-1 text-xs text-[#7d8590]">
         <span>{utcTime}</span>
         <div className="flex items-center gap-2">
-          <button type="button" className="hover:text-slate-300">%</button>
-          <button type="button" className="hover:text-slate-300">Log</button>
-          <button type="button" className="text-sky-400">auto</button>
-          <button type="button" className="rounded p-0.5 hover:bg-slate-700/50" aria-label="Settings">
+          <button type="button" className="hover:text-[#c8cdd4]">%</button>
+          <button type="button" className="hover:text-[#c8cdd4]">Log</button>
+          <button type="button" className="text-[#5b6b7a]">auto</button>
+          <button type="button" className="p-0.5 hover:bg-[#363d4a]" aria-label="Settings">
             <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
