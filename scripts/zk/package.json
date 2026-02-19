@@ -8,6 +8,7 @@
     "verify-proof": "node verify-proof.js",
     "test": "node test-proof-generation.js",
     "test-e2e": "node test-end-to-end-zk-flow.js",
+    "test-perp-e2e": "node test-perp-e2e.js",
     "setup-pool": "node setup-pool-liquidity.js"
   },
   "dependencies": {
