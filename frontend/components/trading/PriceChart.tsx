@@ -52,6 +52,7 @@ export function PriceChart() {
     if (!containerRef.current) return;
 
     const chart = createChart(containerRef.current, {
+      autoSize: true,
       layout: {
         background: { type: ColorType.Solid, color: "#0f172a" },
         textColor: "#94a3b8",
@@ -60,8 +61,6 @@ export function PriceChart() {
         vertLines: { color: "#1e293b" },
         horzLines: { color: "#1e293b" },
       },
-      width: containerRef.current.clientWidth,
-      height: Math.max(containerRef.current.clientHeight, 200),
       rightPriceScale: {
         borderColor: "#334155",
         scaleMargins: { top: 0.1, bottom: 0.25 },
@@ -104,27 +103,14 @@ export function PriceChart() {
     candleSeriesRef.current = candleSeries;
     volumeSeriesRef.current = volumeSeries;
 
-    const handleResize = () => {
-      if (containerRef.current && chartRef.current) {
-        const w = containerRef.current.clientWidth;
-        const h = Math.max(containerRef.current.clientHeight, 200);
-        chartRef.current.applyOptions({ width: w, height: h });
-      }
-    };
-    const ro = new ResizeObserver(handleResize);
-    ro.observe(containerRef.current);
-    window.addEventListener("resize", handleResize);
-
     return () => {
-      ro.disconnect();
-      window.removeEventListener("resize", handleResize);
       chart.remove();
       chartRef.current = null;
       candleSeriesRef.current = null;
       volumeSeriesRef.current = null;
     };
-  // chartData is derived from timeframe; re-create chart only when timeframe changes
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- chartData.candles/volume omitted on purpose
+    // chartData is derived from timeframe; re-create chart only when timeframe changes
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- chartData.candles/volume omitted on purpose
   }, [timeframe]);
 
   const formatPrice = (p: number) => p.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -212,7 +198,7 @@ export function PriceChart() {
       </div>
 
       {/* Chart - fills remaining height, no gap below */}
-      <div ref={containerRef} className="min-h-0 w-full flex-1 self-stretch" />
+      <div ref={containerRef} className="min-h-0 h-full w-full flex-1 self-stretch" />
 
       {/* Bottom bar */}
       <div className="flex items-center justify-between border-t border-[#363d4a] px-2 py-1 text-xs text-[#7d8590]">
