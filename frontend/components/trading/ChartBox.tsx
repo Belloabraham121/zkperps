@@ -8,7 +8,7 @@ export function ChartBox() {
   return (
     <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden border border-b-0 border-[#363d4a] bg-[#21262e]">
       <div className="flex min-h-0 flex-1 overflow-hidden">
-        <div className="min-h-0 min-w-0 flex-1">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           <PriceChart />
         </div>
         <div className="flex min-h-0 w-56 shrink-0 flex-col overflow-hidden">
