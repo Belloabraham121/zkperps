@@ -21,6 +21,22 @@ import {Groth16Verifier} from "./CommitmentVerifier.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 
 /**
+ * @title IPerpPositionManager
+ * @notice Minimal interface for PrivBatchHook to open/close perp positions
+ */
+interface IPerpPositionManager {
+    function openPosition(
+        address user,
+        address market,
+        uint256 size,
+        bool isLong,
+        uint256 leverage,
+        uint256 entryPrice
+    ) external;
+    function closePosition(address user, address market, uint256 sizeToClose, uint256 markPrice) external;
+}
+
+/**
  * @title PrivBatchHook
  * @notice A Uniswap v4 hook enabling private batch swaps through commit-reveal mechanism
  * @dev Users commit hashed swap intents, autonomous agent reveals and executes batched swaps
@@ -44,6 +60,9 @@ contract PrivBatchHook is BaseHook, IUnlockCallback {
     error SlippageExceededForUser(address user, uint256 expected, uint256 actual);
     error NetDeltaMismatch(); // Privacy: Net deltas don't match individual contributions
     error InvalidNetDeltaSign(); // Privacy: Net deltas must have opposite signs
+    error PerpManagerNotSet();
+    error InvalidPerpCommitment();
+    error PerpCommitmentAlreadyRevealed();
 
     // ============ Events ============
     // Privacy-enhanced events: Minimize sensitive data exposure
@@ -76,6 +95,10 @@ contract PrivBatchHook is BaseHook, IUnlockCallback {
         bytes32 indexed commitmentHash
         // ZK proof verified - commitment is valid without revealing parameters
     );
+    event PerpCommitmentSubmitted(PoolId indexed poolId, bytes32 indexed commitmentHash);
+    event PerpCommitmentVerified(PoolId indexed poolId, bytes32 indexed commitmentHash);
+    event PerpCommitmentRevealed(PoolId indexed poolId, bytes32 indexed commitmentHash);
+    event PerpBatchExecuted(PoolId indexed poolId, uint256 batchSize, uint256 executionPrice, uint256 timestamp);
 
     // ============ Structs ============
     struct Commitment {
@@ -119,6 +142,26 @@ contract PrivBatchHook is BaseHook, IUnlockCallback {
         uint256 minAmountOut;
     }
 
+    // ============ Perp structs ============
+    struct PerpIntent {
+        address user;
+        address market;   // market id (address)
+        uint256 size;     // magnitude in base asset (18 decimals)
+        bool isLong;
+        bool isOpen;      // true = open, false = close
+        uint256 collateral; // for opens only (18 decimals)
+        uint256 leverage;   // 1e18 = 1x
+        uint256 nonce;
+        uint256 deadline;
+    }
+
+    // Callback data for perp batch swap (inside unlock)
+    struct PerpSwapCallbackData {
+        PoolKey key;
+        int256 netBaseDelta;  // signed: positive = net long, negative = net short
+        bool baseIsCurrency0;
+    }
+
     // ============ State Variables ============
     mapping(PoolId => Commitment[]) public commitments;
     mapping(PoolId => BatchState) public batchStates;
@@ -133,6 +176,14 @@ contract PrivBatchHook is BaseHook, IUnlockCallback {
     // Key: commitmentHash, Value: true if verified with ZK proof
     mapping(bytes32 => bool) public verifiedCommitments;
 
+    // ============ Perp state ============
+    mapping(PoolId => Commitment[]) public perpCommitments;
+    mapping(bytes32 => PerpIntent) private perpRevealStorage;
+    mapping(bytes32 => bool) public perpVerifiedCommitments;
+    mapping(PoolId => mapping(address => mapping(uint256 => bool))) public perpUsedNonces;
+    mapping(PoolId => BatchState) public perpBatchStates;
+    IPerpPositionManager public perpPositionManager;
+
     // Configurable parameters
     uint256 public constant MIN_COMMITMENTS = 2;
     uint256 public constant BATCH_INTERVAL = 5 minutes;
@@ -146,6 +197,21 @@ contract PrivBatchHook is BaseHook, IUnlockCallback {
 
     constructor(IPoolManager _poolManager, Groth16Verifier _verifier) BaseHook(_poolManager) {
         verifier = _verifier;
+    }
+
+    /**
+     * @notice Set the perp position manager (one-time; must be set before revealAndBatchExecutePerps).
+     * @dev Caller must also set this hook as executor on the PerpPositionManager.
+     */
+    function setPerpPositionManager(IPerpPositionManager _perpPositionManager) external {
+        require(address(perpPositionManager) == address(0), "Already set");
+        perpPositionManager = _perpPositionManager;
+    }
+
+    /// @notice Set perp position manager by address (convenience for external callers/test).
+    function setPerpPositionManagerAddress(address _addr) external {
+        require(address(perpPositionManager) == address(0), "Already set");
+        perpPositionManager = IPerpPositionManager(_addr);
     }
 
     // ============ Hook Permissions ============
@@ -368,6 +434,225 @@ contract PrivBatchHook is BaseHook, IUnlockCallback {
 
         // Privacy-enhanced: Don't emit user address
         emit CommitmentRevealed(poolId, commitmentHash);
+    }
+
+    // ============ Perp commit/reveal ============
+
+    /**
+     * @notice Submit a commitment hash for a perp intent
+     */
+    function submitPerpCommitment(PoolKey calldata key, bytes32 commitmentHash) external {
+        PoolId poolId = key.toId();
+        perpCommitments[poolId].push(Commitment({
+            commitmentHash: commitmentHash,
+            committer: address(0),
+            timestamp: block.timestamp,
+            revealed: false
+        }));
+        emit PerpCommitmentSubmitted(poolId, commitmentHash);
+    }
+
+    /**
+     * @notice Submit a perp commitment with ZK proof
+     */
+    function submitPerpCommitmentWithProof(
+        PoolKey calldata key,
+        bytes32 commitmentHash,
+        uint[2] calldata a,
+        uint[2][2] calldata b,
+        uint[2] calldata c,
+        uint[1] calldata publicSignals
+    ) external {
+        PoolId poolId = key.toId();
+        if (!verifyCommitmentProof(a, b, c, publicSignals)) revert InvalidCommitment();
+        if (publicSignals[0] != uint256(commitmentHash)) revert InvalidCommitment();
+
+        Commitment[] storage poolCommitments = perpCommitments[poolId];
+        for (uint256 i = 0; i < poolCommitments.length; i++) {
+            if (poolCommitments[i].commitmentHash == commitmentHash) {
+                perpVerifiedCommitments[commitmentHash] = true;
+                emit PerpCommitmentVerified(poolId, commitmentHash);
+                return;
+            }
+        }
+        perpCommitments[poolId].push(Commitment({
+            commitmentHash: commitmentHash,
+            committer: address(0),
+            timestamp: block.timestamp,
+            revealed: false
+        }));
+        perpVerifiedCommitments[commitmentHash] = true;
+        emit PerpCommitmentSubmitted(poolId, commitmentHash);
+        emit PerpCommitmentVerified(poolId, commitmentHash);
+    }
+
+    /**
+     * @notice Reveal a perp intent (must match commitment hash)
+     */
+    function submitPerpReveal(PoolKey calldata key, PerpIntent calldata intent) external {
+        PoolId poolId = key.toId();
+        if (block.timestamp > intent.deadline) revert DeadlineExpired();
+        if (perpUsedNonces[poolId][intent.user][intent.nonce]) revert InvalidNonce();
+
+        bytes32 computedHash = keccak256(abi.encode(
+            intent.user,
+            intent.market,
+            intent.size,
+            intent.isLong,
+            intent.isOpen,
+            intent.collateral,
+            intent.leverage,
+            intent.nonce,
+            intent.deadline
+        ));
+
+        Commitment[] storage poolCommitments = perpCommitments[poolId];
+        bool found = false;
+        for (uint256 i = 0; i < poolCommitments.length; i++) {
+            if (poolCommitments[i].commitmentHash == computedHash && !poolCommitments[i].revealed) {
+                found = true;
+                break;
+            }
+        }
+        if (!found) revert InvalidPerpCommitment();
+
+        perpRevealStorage[computedHash] = intent;
+        emit PerpCommitmentRevealed(poolId, computedHash);
+    }
+
+    /**
+     * @notice Reveal a perp intent for a ZK-verified commitment
+     */
+    function submitPerpRevealForZK(
+        PoolKey calldata key,
+        bytes32 commitmentHash,
+        PerpIntent calldata intent
+    ) external {
+        if (!perpVerifiedCommitments[commitmentHash]) revert InvalidPerpCommitment();
+        if (block.timestamp > intent.deadline) revert DeadlineExpired();
+
+        PoolId poolId = key.toId();
+        if (perpUsedNonces[poolId][intent.user][intent.nonce]) revert InvalidNonce();
+
+        perpRevealStorage[commitmentHash] = intent;
+        emit PerpCommitmentRevealed(poolId, commitmentHash);
+    }
+
+    /**
+     * @notice Reveal perp intents and execute batch: net swap + update positions
+     * @param key Pool key for the perp market (base/quote pool)
+     * @param commitmentHashes Array of perp commitment hashes (reveals must be submitted first)
+     * @param baseIsCurrency0 True if base asset is currency0 in the pool
+     */
+    function revealAndBatchExecutePerps(
+        PoolKey calldata key,
+        bytes32[] calldata commitmentHashes,
+        bool baseIsCurrency0
+    ) external {
+        if (address(perpPositionManager) == address(0)) revert PerpManagerNotSet();
+        if (commitmentHashes.length < MIN_COMMITMENTS) revert InsufficientCommitments();
+
+        PoolId poolId = key.toId();
+        BatchState storage state = perpBatchStates[poolId];
+        if (block.timestamp - state.lastBatchTimestamp < BATCH_INTERVAL) revert BatchConditionsNotMet();
+
+        (PerpIntent[] memory intents, int256 netBaseDelta) = _processPerpReveals(poolId, key, commitmentHashes);
+        uint256 executionPrice = _executePerpBatchSwap(key, netBaseDelta, baseIsCurrency0);
+
+        for (uint256 i = 0; i < intents.length; i++) {
+            PerpIntent memory intent = intents[i];
+            if (intent.isOpen) {
+                perpPositionManager.openPosition(
+                    intent.user,
+                    intent.market,
+                    intent.size,
+                    intent.isLong,
+                    intent.leverage,
+                    executionPrice
+                );
+            } else {
+                perpPositionManager.closePosition(intent.user, intent.market, intent.size, executionPrice);
+            }
+        }
+
+        state.lastBatchTimestamp = block.timestamp;
+        state.batchNonce++;
+        Commitment[] storage poolCommitments = perpCommitments[poolId];
+        for (uint256 i = 0; i < commitmentHashes.length; i++) {
+            delete perpRevealStorage[commitmentHashes[i]];
+            _markPerpCommitmentRevealed(poolId, poolCommitments, commitmentHashes[i]);
+        }
+        emit PerpBatchExecuted(poolId, commitmentHashes.length, executionPrice, block.timestamp);
+    }
+
+    /**
+     * @notice Load and validate perp reveals; compute net base delta
+     */
+    function _processPerpReveals(
+        PoolId poolId,
+        PoolKey calldata key,
+        bytes32[] calldata commitmentHashes
+    ) internal returns (PerpIntent[] memory intents, int256 netBaseDelta) {
+        intents = new PerpIntent[](commitmentHashes.length);
+        netBaseDelta = 0;
+
+        Commitment[] storage poolCommitments = perpCommitments[poolId];
+
+        for (uint256 i = 0; i < commitmentHashes.length; i++) {
+            PerpIntent memory intent = perpRevealStorage[commitmentHashes[i]];
+            if (intent.user == address(0)) revert InvalidPerpCommitment();
+            if (block.timestamp > intent.deadline) revert DeadlineExpired();
+            if (perpUsedNonces[poolId][intent.user][intent.nonce]) revert InvalidNonce();
+
+            _validateAndMarkPerpCommitment(poolId, poolCommitments, commitmentHashes[i]);
+            perpUsedNonces[poolId][intent.user][intent.nonce] = true;
+            intents[i] = intent;
+
+            if (intent.isOpen) {
+                netBaseDelta += intent.isLong ? int256(intent.size) : -int256(intent.size);
+            } else {
+                netBaseDelta += intent.isLong ? -int256(intent.size) : int256(intent.size);
+            }
+        }
+    }
+
+    function _validateAndMarkPerpCommitment(
+        PoolId,
+        Commitment[] storage poolCommitments,
+        bytes32 commitmentHash
+    ) internal {
+        for (uint256 j = 0; j < poolCommitments.length; j++) {
+            if (poolCommitments[j].commitmentHash == commitmentHash && !poolCommitments[j].revealed) {
+                return;
+            }
+        }
+        revert InvalidPerpCommitment();
+    }
+
+    function _markPerpCommitmentRevealed(PoolId, Commitment[] storage poolCommitments, bytes32 commitmentHash) internal {
+        for (uint256 j = 0; j < poolCommitments.length; j++) {
+            if (poolCommitments[j].commitmentHash == commitmentHash && !poolCommitments[j].revealed) {
+                poolCommitments[j].revealed = true;
+                return;
+            }
+        }
+    }
+
+    /**
+     * @notice Compute perp commitment hash (view helper)
+     */
+    function computePerpCommitmentHash(PerpIntent calldata intent) external pure returns (bytes32) {
+        return keccak256(abi.encode(
+            intent.user,
+            intent.market,
+            intent.size,
+            intent.isLong,
+            intent.isOpen,
+            intent.collateral,
+            intent.leverage,
+            intent.nonce,
+            intent.deadline
+        ));
     }
 
     /**
@@ -821,9 +1106,27 @@ contract PrivBatchHook is BaseHook, IUnlockCallback {
             sqrtPriceLimitX96: priceLimit
         });
 
-        // Unlock and execute swap
-        bytes memory swapResult = poolManager.unlock(abi.encode(callbackData));
+        // Unlock and execute swap (prefix 0 = swap)
+        bytes memory swapResult = poolManager.unlock(abi.encodePacked(uint8(0), abi.encode(callbackData)));
         swapDelta = abi.decode(swapResult, (BalanceDelta));
+    }
+
+    /**
+     * @notice Execute net perp swap and return execution price (18 decimals)
+     */
+    function _executePerpBatchSwap(
+        PoolKey calldata key,
+        int256 netBaseDelta,
+        bool baseIsCurrency0
+    ) internal returns (uint256 executionPrice) {
+        if (netBaseDelta == 0) revert InvalidPerpCommitment();
+        PerpSwapCallbackData memory callbackData = PerpSwapCallbackData({
+            key: key,
+            netBaseDelta: netBaseDelta,
+            baseIsCurrency0: baseIsCurrency0
+        });
+        bytes memory result = poolManager.unlock(abi.encodePacked(uint8(1), abi.encode(callbackData)));
+        executionPrice = abi.decode(result, (uint256));
     }
 
     /**
@@ -834,7 +1137,15 @@ contract PrivBatchHook is BaseHook, IUnlockCallback {
     function unlockCallback(bytes calldata data) external returns (bytes memory) {
         require(msg.sender == address(poolManager), "Only PoolManager");
 
-        SwapCallbackData memory callbackData = abi.decode(data, (SwapCallbackData));
+        uint8 callbackType = uint8(data[0]);
+        bytes memory payload = new bytes(data.length - 1);
+        for (uint256 i = 1; i < data.length; i++) {
+            payload[i - 1] = data[i];
+        }
+        if (callbackType == 1) {
+            return _unlockCallbackPerp(payload);
+        }
+        SwapCallbackData memory callbackData = abi.decode(payload, (SwapCallbackData));
 
         Currency inputCurrency = callbackData.zeroForOne
             ? callbackData.key.currency0
@@ -886,6 +1197,59 @@ contract PrivBatchHook is BaseHook, IUnlockCallback {
         }
 
         return abi.encode(swapDelta);
+    }
+
+    /**
+     * @notice Callback for perp batch: execute net base swap and return execution price (18 decimals)
+     */
+    function _unlockCallbackPerp(bytes memory payload) internal returns (bytes memory) {
+        PerpSwapCallbackData memory cb = abi.decode(payload, (PerpSwapCallbackData));
+        int256 netBase = cb.netBaseDelta;
+        bool zeroForOne = cb.baseIsCurrency0 ? (netBase > 0) : (netBase < 0); // buy base = base out
+        uint256 absBase = uint256(netBase > 0 ? netBase : -netBase);
+        if (absBase == 0) return abi.encode(uint256(0));
+
+        uint160 priceLimit = zeroForOne ? TickMath.MIN_SQRT_PRICE + 1 : TickMath.MAX_SQRT_PRICE - 1;
+        // amountSpecified: negative = exact input, positive = exact output (in V4)
+        int256 amountSpecified = netBase > 0 ? int256(absBase) : -int256(absBase);
+
+        SwapParams memory swapParams = SwapParams({
+            zeroForOne: zeroForOne,
+            amountSpecified: amountSpecified,
+            sqrtPriceLimitX96: priceLimit
+        });
+
+        BalanceDelta swapDelta = poolManager.swap(cb.key, swapParams, "");
+
+        Currency baseCurrency = cb.baseIsCurrency0 ? cb.key.currency0 : cb.key.currency1;
+        Currency quoteCurrency = cb.baseIsCurrency0 ? cb.key.currency1 : cb.key.currency0;
+        int128 baseDelta = cb.baseIsCurrency0 ? swapDelta.amount0() : swapDelta.amount1();
+        int128 quoteDelta = cb.baseIsCurrency0 ? swapDelta.amount1() : swapDelta.amount0();
+
+        // Settle: pay what we owe
+        if (baseDelta < 0) {
+            poolManager.sync(baseCurrency);
+            IERC20(Currency.unwrap(baseCurrency)).transfer(address(poolManager), uint256(uint128(-baseDelta)));
+            poolManager.settle();
+        }
+        if (quoteDelta < 0) {
+            poolManager.sync(quoteCurrency);
+            IERC20(Currency.unwrap(quoteCurrency)).transfer(address(poolManager), uint256(uint128(-quoteDelta)));
+            poolManager.settle();
+        }
+        // Take what we're owed
+        if (baseDelta > 0) {
+            poolManager.take(baseCurrency, address(this), uint256(uint128(baseDelta)));
+        }
+        if (quoteDelta > 0) {
+            poolManager.take(quoteCurrency, address(this), uint256(uint128(quoteDelta)));
+        }
+
+        // Execution price in 18 decimals: quote per base (quoteDelta / baseDelta)
+        uint256 baseAbs = baseDelta > 0 ? uint256(uint128(baseDelta)) : uint256(uint128(-baseDelta));
+        uint256 quoteAbs = quoteDelta > 0 ? uint256(uint128(quoteDelta)) : uint256(uint128(-quoteDelta));
+        uint256 executionPrice = baseAbs > 0 ? (quoteAbs * 1e18) / baseAbs : 0;
+        return abi.encode(executionPrice);
     }
 
     /**
