@@ -81,6 +81,7 @@ const HOOK_ABI = [
   "function computePerpCommitmentHash(tuple(address user, address market, uint256 size, bool isLong, bool isOpen, uint256 collateral, uint256 leverage, uint256 nonce, uint256 deadline) intent) view returns (bytes32)",
   "function BATCH_INTERVAL() view returns (uint256)",
   "function perpBatchStates(bytes32) view returns (uint256 lastBatchTimestamp, uint256 commitmentCount)",
+  "function perpPositionManager() view returns (address)",
   "event PerpCommitmentSubmitted(bytes32 indexed poolId, bytes32 indexed commitmentHash)",
   "event PerpBatchExecuted(bytes32 indexed poolId, uint256 batchSize, uint256 executionPrice, uint256 timestamp)",
 ];
@@ -627,7 +628,26 @@ async function main() {
 
   // 6. Execute batch
   console.log("\n--- 6. revealAndBatchExecutePerps ---");
+  // Check if perpPositionManager is set (declare outside try so it's accessible in catch)
+  let perpManagerAddr;
   try {
+    perpManagerAddr = await hook.perpPositionManager();
+  } catch (e) {
+    console.error("  Error: Failed to read perpPositionManager:", e.message);
+    process.exit(1);
+  }
+  
+  if (!perpManagerAddr || perpManagerAddr === ethers.ZeroAddress) {
+    console.error("  Error: perpPositionManager is not set on Hook!");
+    console.error("  Hook:", hookAddr);
+    console.error("  Run: forge script script/SetPerpManager.s.sol:SetPerpManager --rpc-url arbitrum_sepolia --broadcast");
+    process.exit(1);
+  }
+  
+  console.log("  Verified perpPositionManager is set:", perpManagerAddr);
+  
+  try {
+    
     // #region agent log
     fetch("http://127.0.0.1:7250/ingest/45f38e27-30c3-4adc-91dc-b2d064327c1e", {
       method: "POST",
@@ -640,6 +660,8 @@ async function main() {
           poolId: poolId,
           commitmentHashesCount: commitmentHashes.length,
           baseIsCurrency0: BASE_IS_CURRENCY0,
+          perpManagerAddr: perpManagerAddr,
+          perpManagerIsSet: perpManagerAddr !== ethers.ZeroAddress,
         },
         timestamp: Date.now(),
         hypothesisId: "B",
@@ -670,19 +692,44 @@ async function main() {
     // #endregion
   } catch (e) {
     // #region agent log
+    const errorSelector = e.data && e.data.length >= 10 ? e.data.substring(0, 10) : "none";
+    
+    // Decode known error selectors
+    const errorMap = {
+      "0xbf611a9d": "PerpManagerNotSet",
+      "0x7c9c6e8f": "PriceLimitAlreadyExceeded",
+      "0xdf239ca8": "PerpCommitmentAlreadyRevealed",
+      "0xfe3f0ca4": "InvalidPerpCommitment",
+      "0x1f2a2005": "DeadlineExpired",
+      "0x2d4e4f9d": "InvalidNonce",
+      "0x8c2e2b3a": "InsufficientCommitments",
+      "0x4e8e5c5c": "BatchConditionsNotMet",
+    };
+    
+    const decodedError = errorMap[errorSelector] || "UnknownError";
+    
     const errorData = {
       message: e.message || e.shortMessage || "unknown",
       reason: e.reason || "none",
       code: e.code || "none",
       data: e.data || "none",
       hookAddr: hookAddr,
-      errorSelector: e.data
-        ? e.data.length >= 10
-          ? e.data.substring(0, 10)
-          : e.data
-        : "none",
+      errorSelector: errorSelector,
+      decodedError: decodedError,
       isPriceLimitError: e.data && e.data.startsWith("0x7c9c6e8f"),
+      isPerpManagerNotSet: e.data && e.data.startsWith("0xbf611a9d"),
+      isInvalidPerpCommitment: e.data && e.data.startsWith("0xfe3f0ca4"),
+      isPerpCommitmentAlreadyRevealed: e.data && e.data.startsWith("0xdf239ca8"),
+      isBatchConditionsNotMet: e.data && e.data.startsWith("0x4e8e5c5c"),
+      isDeadlineExpired: e.data && e.data.startsWith("0x1f2a2005"),
+      isInvalidNonce: e.data && e.data.startsWith("0x2d4e4f9d"),
+      isInsufficientCommitments: e.data && e.data.startsWith("0x8c2e2b3a"),
+      poolId: poolId,
+      commitmentHashesCount: commitmentHashes.length,
+      baseIsCurrency0: BASE_IS_CURRENCY0,
+      perpManagerAddr: perpManagerAddr,
     };
+    
     fetch("http://127.0.0.1:7250/ingest/45f38e27-30c3-4adc-91dc-b2d064327c1e", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -697,6 +744,12 @@ async function main() {
     // #endregion
 
     console.error("  Execute failed:", e.message || e.shortMessage);
+    
+    // Decode error selector (reuse errorSelector from above)
+    if (errorSelector && errorSelector !== "none" && decodedError !== "UnknownError") {
+      console.error("  Decoded error:", decodedError);
+    }
+    
     if ((e.reason || e.message || "").includes("insufficient balance")) {
       console.error(
         "  The Hook must hold enough quote to settle the swap; the script funds it in step 5.5. If you still see this, increase the signer's quote balance or the hookQuoteNeeded amount.",
@@ -712,6 +765,20 @@ async function main() {
           "  Expected Hook (with fix): 0xf31d8e462185bd0a7eedece7f5cecc7048e700c4",
         );
         console.error("  Current Hook:", hookAddr);
+      } else if (e.data.startsWith("0xfe3f0ca4")) {
+        console.error("  Error: InvalidPerpCommitment - Reveal not found or commitment invalid");
+        console.error("  Check that reveals were submitted before batch execution");
+      } else if (e.data.startsWith("0xdf239ca8")) {
+        console.error("  Error: PerpCommitmentAlreadyRevealed - Commitment was already revealed");
+      } else if (e.data.startsWith("0x4e8e5c5c")) {
+        console.error("  Error: BatchConditionsNotMet - Batch interval not met");
+        console.error("  Wait 5 minutes between batch executions");
+      } else if (e.data.startsWith("0x1f2a2005")) {
+        console.error("  Error: DeadlineExpired - Intent deadline has passed");
+      } else if (e.data.startsWith("0x2d4e4f9d")) {
+        console.error("  Error: InvalidNonce - Nonce already used");
+      } else if (e.data.startsWith("0x8c2e2b3a")) {
+        console.error("  Error: InsufficientCommitments - Need at least 2 commitments");
       }
     }
     process.exit(1);
