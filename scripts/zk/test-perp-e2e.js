@@ -241,31 +241,6 @@ async function main() {
   console.log("  PoolId:", poolId);
   console.log("  baseIsCurrency0:", BASE_IS_CURRENCY0);
 
-  // #region agent log
-  fetch("http://127.0.0.1:7250/ingest/45f38e27-30c3-4adc-91dc-b2d064327c1e", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      location: "test-perp-e2e.js:179",
-      message: "Hook address verification",
-      data: {
-        hookAddr: hookAddr,
-        expectedNewHook: "0xf31d8e462185bd0a7eedece7f5cecc7048e700c4",
-        expectedOldHook: "0x9c8e0d45b243381fb0da88c2171127d3c01940c4",
-        isNewHook:
-          hookAddr.toLowerCase() ===
-          "0xf31d8e462185bd0a7eedece7f5cecc7048e700c4".toLowerCase(),
-        isOldHook:
-          hookAddr.toLowerCase() ===
-          "0x9c8e0d45b243381fb0da88c2171127d3c01940c4".toLowerCase(),
-        chainId: chainId,
-      },
-      timestamp: Date.now(),
-      hypothesisId: "A",
-    }),
-  }).catch(() => {});
-  // #endregion
-
   let usdcDec = 6;
   try {
     usdcDec = await usdc.decimals();
@@ -495,53 +470,10 @@ async function main() {
   const denominator = oneEther * oneEther; // 1e36
   const hookQuoteNeeded = numerator / denominator;
 
-  // #region agent log
-  fetch("http://127.0.0.1:7250/ingest/45f38e27-30c3-4adc-91dc-b2d064327c1e", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      location: "test-perp-e2e.js:352",
-      message: "hookQuoteNeeded calculated",
-      data: {
-        hookQuoteNeeded: hookQuoteNeeded.toString(),
-        hookQuoteNeededFormatted: ethers.formatUnits(hookQuoteNeeded, quoteDec),
-        numerator: numerator.toString(),
-        denominator: denominator.toString(),
-        expectedUsdc: "1500",
-        actualUsdc: ethers.formatUnits(hookQuoteNeeded, quoteDec),
-      },
-      timestamp: Date.now(),
-      hypothesisId: "D",
-    }),
-  }).catch(() => {});
-  // #endregion
-
   let hookQuoteBalanceBefore = 0n;
   try {
     hookQuoteBalanceBefore = await quoteToken.balanceOf(hookAddr);
   } catch (_) {}
-
-  // #region agent log
-  fetch("http://127.0.0.1:7250/ingest/45f38e27-30c3-4adc-91dc-b2d064327c1e", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      location: "test-perp-e2e.js:363",
-      message: "hook balance before funding",
-      data: {
-        hookQuoteBalanceBefore: hookQuoteBalanceBefore.toString(),
-        hookQuoteBalanceBeforeFormatted: ethers.formatUnits(
-          hookQuoteBalanceBefore,
-          quoteDec,
-        ),
-        hookQuoteNeeded: hookQuoteNeeded.toString(),
-        hookQuoteNeededFormatted: ethers.formatUnits(hookQuoteNeeded, quoteDec),
-      },
-      timestamp: Date.now(),
-      hypothesisId: "E",
-    }),
-  }).catch(() => {});
-  // #endregion
 
   if (hookQuoteBalanceBefore < hookQuoteNeeded) {
     const toTransfer = hookQuoteNeeded - hookQuoteBalanceBefore;
@@ -565,29 +497,7 @@ async function main() {
     }
     const fundTx = await quoteToken.transfer(hookAddr, toTransfer);
     await fundTx.wait();
-
-    // #region agent log
     const hookQuoteBalanceAfter = await quoteToken.balanceOf(hookAddr);
-    fetch("http://127.0.0.1:7250/ingest/45f38e27-30c3-4adc-91dc-b2d064327c1e", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        location: "test-perp-e2e.js:375",
-        message: "hook balance after funding",
-        data: {
-          hookQuoteBalanceAfter: hookQuoteBalanceAfter.toString(),
-          hookQuoteBalanceAfterFormatted: ethers.formatUnits(
-            hookQuoteBalanceAfter,
-            quoteDec,
-          ),
-          toTransfer: toTransfer.toString(),
-          toTransferFormatted: ethers.formatUnits(toTransfer, quoteDec),
-        },
-        timestamp: Date.now(),
-        hypothesisId: "F",
-      }),
-    }).catch(() => {});
-    // #endregion
 
     console.log("\n--- Fund Hook (quote for batch) ---");
     console.log(
@@ -647,28 +557,6 @@ async function main() {
   console.log("  Verified perpPositionManager is set:", perpManagerAddr);
   
   try {
-    
-    // #region agent log
-    fetch("http://127.0.0.1:7250/ingest/45f38e27-30c3-4adc-91dc-b2d064327c1e", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        location: "test-perp-e2e.js:402",
-        message: "Before batch execution",
-        data: {
-          hookAddr: hookAddr,
-          poolId: poolId,
-          commitmentHashesCount: commitmentHashes.length,
-          baseIsCurrency0: BASE_IS_CURRENCY0,
-          perpManagerAddr: perpManagerAddr,
-          perpManagerIsSet: perpManagerAddr !== ethers.ZeroAddress,
-        },
-        timestamp: Date.now(),
-        hypothesisId: "B",
-      }),
-    }).catch(() => {});
-    // #endregion
-
     const execTx = await hook.revealAndBatchExecutePerps(
       poolKey,
       commitmentHashes,
@@ -676,25 +564,9 @@ async function main() {
     );
     await execTx.wait();
     console.log("  Tx:", execTx.hash);
-
-    // #region agent log
-    fetch("http://127.0.0.1:7250/ingest/45f38e27-30c3-4adc-91dc-b2d064327c1e", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        location: "test-perp-e2e.js:405",
-        message: "Batch execution succeeded",
-        data: { txHash: execTx.hash },
-        timestamp: Date.now(),
-        hypothesisId: "B",
-      }),
-    }).catch(() => {});
-    // #endregion
   } catch (e) {
-    // #region agent log
-    const errorSelector = e.data && e.data.length >= 10 ? e.data.substring(0, 10) : "none";
-    
     // Decode known error selectors
+    const errorSelector = e.data && e.data.length >= 10 ? e.data.substring(0, 10) : null;
     const errorMap = {
       "0xbf611a9d": "PerpManagerNotSet",
       "0x7c9c6e8f": "PriceLimitAlreadyExceeded",
@@ -707,43 +579,7 @@ async function main() {
       "0x7fb6be02": "OnlyExecutor",
     };
     
-    const decodedError = errorMap[errorSelector] || "UnknownError";
-    
-    const errorData = {
-      message: e.message || e.shortMessage || "unknown",
-      reason: e.reason || "none",
-      code: e.code || "none",
-      data: e.data || "none",
-      hookAddr: hookAddr,
-      errorSelector: errorSelector,
-      decodedError: decodedError,
-      isPriceLimitError: e.data && e.data.startsWith("0x7c9c6e8f"),
-      isPerpManagerNotSet: e.data && e.data.startsWith("0xbf611a9d"),
-      isInvalidPerpCommitment: e.data && e.data.startsWith("0xfe3f0ca4"),
-      isPerpCommitmentAlreadyRevealed: e.data && e.data.startsWith("0xdf239ca8"),
-      isBatchConditionsNotMet: e.data && e.data.startsWith("0x4e8e5c5c"),
-      isDeadlineExpired: e.data && e.data.startsWith("0x1f2a2005"),
-      isInvalidNonce: e.data && e.data.startsWith("0x2d4e4f9d"),
-      isInsufficientCommitments: e.data && e.data.startsWith("0x8c2e2b3a"),
-      isOnlyExecutor: e.data && e.data.startsWith("0x7fb6be02"),
-      poolId: poolId,
-      commitmentHashesCount: commitmentHashes.length,
-      baseIsCurrency0: BASE_IS_CURRENCY0,
-      perpManagerAddr: perpManagerAddr,
-    };
-    
-    fetch("http://127.0.0.1:7250/ingest/45f38e27-30c3-4adc-91dc-b2d064327c1e", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        location: "test-perp-e2e.js:407",
-        message: "Batch execution failed",
-        data: errorData,
-        timestamp: Date.now(),
-        hypothesisId: "C",
-      }),
-    }).catch(() => {});
-    // #endregion
+    const decodedError = errorSelector && errorMap[errorSelector] ? errorMap[errorSelector] : null;
 
     console.error("  Execute failed:", e.message || e.shortMessage);
     

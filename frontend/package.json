@@ -9,12 +9,14 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@privy-io/react-auth": "^3.14.1",
     "@tanstack/react-query": "^5.62.0",
     "@tanstack/react-table": "^8.20.0",
     "lightweight-charts": "^5.1.0",
     "next": "16.1.6",
     "react": "19.2.3",
-    "react-dom": "19.2.3"
+    "react-dom": "19.2.3",
+    "viem": "^2.46.2"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

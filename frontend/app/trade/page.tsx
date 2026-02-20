@@ -1,5 +1,12 @@
+"use client";
+
 import { TradeLayout } from "@/components/layout/TradeLayout";
+import { AuthGuard } from "@/components/auth/AuthGuard";
 
 export default function TradePage() {
-  return <TradeLayout />;
+  return (
+    <AuthGuard>
+      <TradeLayout />
+    </AuthGuard>
+  );
 }

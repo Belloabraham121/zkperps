@@ -1,10 +1,12 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
+import { useAuth } from "@/lib/auth";
 
 const TRADING_ACCOUNT_BALANCE = "$27,594.09";
 
 export function NavbarBox() {
+  const { logout } = useAuth();
   const [profileOpen, setProfileOpen] = useState(false);
   const profileRef = useRef<HTMLDivElement>(null);
 
@@ -79,7 +81,10 @@ export function NavbarBox() {
               <button
                 type="button"
                 className="block w-full px-3 py-2 text-left text-sm text-[#c8cdd4] hover:bg-[#363d4a]"
-                onClick={() => setProfileOpen(false)}
+                onClick={() => {
+                  setProfileOpen(false);
+                  logout();
+                }}
               >
                 Sign out
               </button>
