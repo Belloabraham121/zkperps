@@ -66,11 +66,11 @@ export function useAuth() {
       const isNotExternal = !isExternalWallet(w);
       return isPrivyType && isNotExternal;
     });
-    
+
     if (privyWallets.length > 0) {
       return privyWallets[0];
     }
-    
+
     return undefined;
   }, [wallets]);
   const walletAddress = embeddedWallet?.address;
@@ -83,10 +83,10 @@ export function useAuth() {
     }
     // Otherwise find the embedded wallet in linkedAccounts (type 'wallet' with matching address)
     const walletAccount = user.linkedAccounts?.find(
-      (acc): acc is { type: "wallet"; address: string; id?: string | null } =>
+      (acc) =>
         acc && typeof acc === "object" && "type" in acc && acc.type === "wallet" && "address" in acc &&
-        String(acc.address).toLowerCase() === walletAddress.toLowerCase()
-    );
+        String((acc as any).address).toLowerCase() === walletAddress.toLowerCase()
+    ) as { type: "wallet"; address: string; id?: string | null } | undefined;
     if (walletAccount && "id" in walletAccount && walletAccount.id != null) {
       return String(walletAccount.id);
     }
@@ -142,7 +142,7 @@ export function useAuth() {
         let accessToken: string | null = null;
         const now = Date.now();
         const isTokenCacheValid = cachedAccessToken.current && (now - tokenCacheTime.current) < TOKEN_CACHE_TTL;
-        
+
         if (isTokenCacheValid) {
           accessToken = cachedAccessToken.current;
         } else {
@@ -166,7 +166,7 @@ export function useAuth() {
             return;
           }
         }
-        
+
         if (!accessToken || accessToken.trim() === "") {
           cachedAccessToken.current = null;
           setAuthState({
@@ -200,7 +200,7 @@ export function useAuth() {
         // Backend returns token: null with a message when wallet needs to be linked
         if (!authResponse.token && authResponse.message?.includes("link")) {
           let currentWallet = embeddedWallet;
-          
+
           // Step 1: Check if wallet already exists
           if (!currentWallet) {
             currentWallet = wallets.find((w) => {
@@ -209,22 +209,22 @@ export function useAuth() {
               return isPrivyType && isNotExternal;
             });
           }
-          
+
           // Step 2: If no wallet exists, create one
           if (!currentWallet) {
             try {
               const createdWallet = await createWallet();
-              
+
               // Wait briefly for wallet to appear in wallets array
               await new Promise((resolve) => setTimeout(resolve, 300));
-              
+
               // Find the newly created wallet in wallets array
               const foundWallet = wallets.find((w) => {
                 const isPrivyType = w.walletClientType === "privy" || w.walletClientType === "embedded";
                 const isNotExternal = !isExternalWallet(w);
                 return isPrivyType && isNotExternal && w.address === createdWallet.address;
               });
-              
+
               if (foundWallet) {
                 currentWallet = foundWallet;
               }
@@ -241,10 +241,10 @@ export function useAuth() {
               currentWalletId = String(user.wallet.id);
             } else {
               const walletAccount = user.linkedAccounts?.find(
-                (acc): acc is { type: "wallet"; address: string; id?: string | null } =>
+                (acc) =>
                   acc && typeof acc === "object" && "type" in acc && acc.type === "wallet" && "address" in acc &&
-                  String(acc.address).toLowerCase() === currentWalletAddress.toLowerCase()
-              );
+                  String((acc as any).address).toLowerCase() === currentWalletAddress.toLowerCase()
+              ) as { type: "wallet"; address: string; id?: string | null } | undefined;
               if (walletAccount && "id" in walletAccount && walletAccount.id != null) {
                 currentWalletId = String(walletAccount.id);
               }
@@ -253,10 +253,10 @@ export function useAuth() {
               // Step 1: Add backend signer to wallet (if server-side signing is enabled)
               // Only attempt if signerId is provided and valid
               const signerId = authResponse.signerId;
-              const hasValidSignerId = signerId && 
-                                      signerId.trim() !== "" && 
-                                      signerId.length > 10; // Basic validation
-              
+              const hasValidSignerId = signerId &&
+                signerId.trim() !== "" &&
+                signerId.length > 10; // Basic validation
+
               if (!signerSetupDone.current.has(currentWalletAddress) && hasValidSignerId && signerId) {
                 try {
                   console.log("Adding backend signer to wallet:", { address: currentWalletAddress, signerId });
@@ -288,11 +288,11 @@ export function useAuth() {
                 currentWalletAddress,
                 currentWalletId
               );
-              
+
               if (!linkResponse.token) {
                 throw new Error("Failed to link wallet - no token received");
               }
-              
+
               if (currentWalletId) lastLinkedWalletId.current = currentWalletId;
               authResponse = linkResponse;
             } catch (linkError) {
@@ -329,10 +329,10 @@ export function useAuth() {
 
         // Ensure signer is added if we have wallet and signerId
         const signerId = authResponse.signerId;
-        const hasValidSignerId = signerId && 
-                                signerId.trim() !== "" && 
-                                signerId.length > 10; // Basic validation
-        
+        const hasValidSignerId = signerId &&
+          signerId.trim() !== "" &&
+          signerId.length > 10; // Basic validation
+
         if (authResponse.token && walletAddress && hasValidSignerId && signerId) {
           if (!signerSetupDone.current.has(walletAddress)) {
             try {
@@ -454,7 +454,7 @@ export function useAuth() {
           lastLinkedWalletId.current = walletId;
         }
       })
-      .catch(() => {});
+      .catch(() => { });
     return () => { cancelled = true; };
   }, [authState.token, walletAddress, walletId, getAccessToken]);
 
@@ -498,7 +498,7 @@ export function useAuth() {
       // Get signerId from backend
       const authResponse = await api.login(accessToken);
       const signerId = authResponse.signerId;
-      
+
       if (!signerId || signerId.trim() === "" || signerId.length <= 10) {
         console.error("No valid signerId returned from backend");
         return false;
@@ -513,7 +513,7 @@ export function useAuth() {
         address: walletAddress,
         signers: [{ signerId }],
       });
-      
+
       signerSetupDone.current.add(walletAddress);
       console.log("Successfully added backend signer to wallet");
       return true;

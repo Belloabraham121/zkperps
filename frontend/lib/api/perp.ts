@@ -204,7 +204,7 @@ export async function computeCommitmentHash(
  */
 export async function submitCommitment(
   commitmentHash: string,
-  poolKey?: PoolKey,
+  poolKey: PoolKey | undefined,
   token: string
 ): Promise<{ hash: string }> {
   return apiRequest<{ hash: string }>(
@@ -222,7 +222,7 @@ export async function submitCommitment(
  */
 export async function submitReveal(
   intent: PerpIntent,
-  poolKey?: PoolKey,
+  poolKey: PoolKey | undefined,
   token: string
 ): Promise<{ hash: string }> {
   const normalized = normalizeIntentForContract(intent);
@@ -242,8 +242,8 @@ export async function submitReveal(
  */
 export async function executeBatch(
   commitmentHashes: string[],
-  poolKey?: PoolKey,
-  baseIsCurrency0?: boolean,
+  poolKey: PoolKey | undefined,
+  baseIsCurrency0: boolean | undefined,
   token: string
 ): Promise<{ hash: string }> {
   return apiRequest<{ hash: string }>(
@@ -279,7 +279,7 @@ export async function executeBatchNow(token: string): Promise<{
  * Get user's position for a market
  */
 export async function getPosition(
-  marketId?: string,
+  marketId: string | undefined,
   token: string
 ): Promise<{ marketId: string; position: Position | null }> {
   const query = marketId ? `?marketId=${marketId}` : "";

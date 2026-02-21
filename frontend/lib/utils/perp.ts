@@ -111,9 +111,9 @@ export function createPerpIntent(params: {
 
   // Match e2e: collateralWei = (size * ethers.parseEther("2800")) / leverage (18 decimals)
   const sizeWei = BigInt(sizeBigInt);
-  const priceWei = BigInt(DEFAULT_ENTRY_PRICE_18) * 10n ** 18n;
+  const priceWei = BigInt(DEFAULT_ENTRY_PRICE_18) * BigInt("1000000000000000000");
   const leverageWei = BigInt(leverageBigInt);
-  const collateralWei = leverageWei > 0n ? (sizeWei * priceWei) / leverageWei : 0n;
+  const collateralWei = leverageWei > BigInt(0) ? (sizeWei * priceWei) / leverageWei : BigInt(0);
   const collateral = collateralWei.toString();
 
   return {
@@ -135,7 +135,7 @@ export function createPerpIntent(params: {
 export function formatPositionSize(sizeStr: string, decimals: number = 18): string {
   // Handle zero or empty
   if (!sizeStr || sizeStr === "0") return "0";
-  
+
   const size = amountFromBigInt(sizeStr.replace("-", ""), decimals);
   const sign = sizeStr.startsWith("-") ? "-" : "+";
   return `${sign}${size.toFixed(4)}`;
@@ -156,25 +156,25 @@ export function estimateLiquidationPriceUSD(params: {
   const mm = params.maintenanceMarginRatio ?? 0.05;
   if (sizeBaseAsset <= 0 || entryPriceUSD <= 0) return null;
 
-  const PRECISION = 10n ** 18n;
+  const PRECISION = BigInt("1000000000000000000");
   const absSize = BigInt(Math.round(sizeBaseAsset * 1e18));
   const entryPrice = BigInt(Math.round(entryPriceUSD * 1e18));
   const collateral = BigInt(Math.round(collateralUSD * 1e18));
   const maintenanceMargin = BigInt(Math.round(mm * 1e18));
 
-  if (absSize === 0n) return null;
+  if (absSize === BigInt(0)) return null;
 
   if (isLong) {
     const num = (absSize * entryPrice) / PRECISION;
     if (num <= collateral) return null;
     const denom = absSize * (PRECISION - maintenanceMargin);
-    if (denom === 0n) return null;
-    const ratio = (num - collateral) * PRECISION / denom;
+    if (denom === BigInt(0)) return null;
+    const ratio = ((num - collateral) * PRECISION) / denom;
     return Number(ratio);
   } else {
     const num = (absSize * entryPrice) / PRECISION + collateral;
     const denom = absSize * (PRECISION + maintenanceMargin);
-    if (denom === 0n) return null;
+    if (denom === BigInt(0)) return null;
     const ratio = (num * PRECISION) / denom;
     return Number(ratio);
   }
