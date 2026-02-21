@@ -1,20 +1,12 @@
 /**
- * Main chart area: candlestick chart + depth / trade book.
+ * Main chart area: price chart only.
  */
 import { PriceChart } from "./PriceChart";
-import { DepthChart } from "./DepthChart";
 
 export function ChartBox() {
   return (
-    <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden border border-b-0 border-[#363d4a] bg-[#21262e]">
-      <div className="flex min-h-0 flex-1 overflow-hidden">
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <PriceChart />
-        </div>
-        <div className="flex min-h-0 w-56 shrink-0 flex-col overflow-hidden">
-          <DepthChart />
-        </div>
-      </div>
+    <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden border border-b-0 border-r-0 border-[#363d4a] bg-[#21262e]">
+      <PriceChart />
     </section>
   );
 }

@@ -57,3 +57,37 @@ export function hasCoingeckoApiKey(): boolean {
     typeof process !== "undefined" && process.env.NEXT_PUBLIC_COINGECKO_API_KEY
   );
 }
+
+/** CoinGecko coin id for simple/price (e.g. "bitcoin", "ethereum"). */
+export type CoinGeckoId = "bitcoin" | "ethereum";
+
+/** Response shape for /simple/price with include_24hr_change=true. */
+export type SimplePriceResponse = Record<
+  CoinGeckoId,
+  { usd: number; usd_24h_change: number | null }
+>;
+
+/**
+ * Fetch current price and 24h change from CoinGecko simple/price.
+ * Used for the market info bar (BTCUSD, 24h change).
+ */
+export async function fetchSimplePrice(
+  coinId: CoinGeckoId,
+  vsCurrency = "usd"
+): Promise<{ price: number; change24h: number; changePercent24h: number }> {
+  const url = `${COINGECKO_BASE}/simple/price?ids=${coinId}&vs_currencies=${vsCurrency}&include_24hr_change=true`;
+  const res = await fetch(url, { headers: getHeaders() });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`CoinGecko simple price failed: ${res.status} ${text}`);
+  }
+  const data = (await res.json()) as SimplePriceResponse;
+  const row = data[coinId];
+  if (!row || typeof row.usd !== "number") {
+    throw new Error("CoinGecko: missing price data");
+  }
+  const price = row.usd;
+  const changePercent24h = row.usd_24h_change ?? 0;
+  const change24h = price * (changePercent24h / 100);
+  return { price, change24h, changePercent24h };
+}

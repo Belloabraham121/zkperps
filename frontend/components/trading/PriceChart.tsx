@@ -1,22 +1,44 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  createChart,
-  CandlestickSeries,
-  HistogramSeries,
-  ColorType,
-  type IChartApi,
-  type ISeriesApi,
-} from "lightweight-charts";
+  Chart as ChartJS,
+  CategoryScale,
+  LinearScale,
+  PointElement,
+  LineElement,
+  BarElement,
+  LineController,
+  BarController,
+  TimeScale,
+  Tooltip,
+  Legend,
+  Filler,
+} from "chart.js";
+import "chartjs-adapter-date-fns";
+import { Chart } from "react-chartjs-2";
 import { generateCandleData, getOhlcvSummary } from "@/lib/chart-data";
+import type { OHLCPoint, VolumePoint } from "@/lib/chart-data";
 import {
   fetchEthUsdOhlc,
   coingeckoOhlcToChart,
   TIMEFRAME_TO_DAYS,
   hasCoingeckoApiKey,
 } from "@/lib/coingecko";
-import type { CandlestickData, HistogramData, UTCTimestamp } from "lightweight-charts";
+
+ChartJS.register(
+  CategoryScale,
+  LinearScale,
+  PointElement,
+  LineElement,
+  BarElement,
+  LineController,
+  BarController,
+  TimeScale,
+  Tooltip,
+  Legend,
+  Filler
+);
 
 const TIMEFRAMES = ["1M", "15M", "1H", "1D", "1W"] as const;
 const INTERVAL_MIN: Record<(typeof TIMEFRAMES)[number], number> = {
@@ -29,34 +51,30 @@ const INTERVAL_MIN: Record<(typeof TIMEFRAMES)[number], number> = {
 const CANDLE_COUNT = 80;
 const BASE_PRICE = 27554;
 
-type ChartData = {
-  candles: CandlestickData<UTCTimestamp>[];
-  volume: HistogramData<UTCTimestamp>[];
+type ChartDataState = {
+  points: OHLCPoint[];
+  volume: VolumePoint[];
   summary: { open: number; high: number; low: number; close: number; volumePct: number; amplitudePct: number };
 };
 
-function getMockChartData(timeframe: (typeof TIMEFRAMES)[number]): ChartData {
-  const { candles, volume } = generateCandleData(
+function getMockChartData(timeframe: (typeof TIMEFRAMES)[number]): ChartDataState {
+  const { points, volume } = generateCandleData(
     BASE_PRICE,
     CANDLE_COUNT,
     INTERVAL_MIN[timeframe]
   );
-  const s = getOhlcvSummary(candles);
+  const s = getOhlcvSummary(points);
   return {
-    candles,
+    points,
     volume,
     summary: { ...s, volumePct: 0.02, amplitudePct: s.amplitudePct || 0.33 },
   };
 }
 
 export function PriceChart() {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const chartRef = useRef<IChartApi | null>(null);
-  const candleSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
-  const volumeSeriesRef = useRef<ISeriesApi<"Histogram"> | null>(null);
   const [timeframe, setTimeframe] = useState<(typeof TIMEFRAMES)[number]>("1M");
   const [activeTab, setActiveTab] = useState<"Price" | "Funding">("Price");
-  const [chartData, setChartData] = useState<ChartData>(() => getMockChartData("1M"));
+  const [chartData, setChartData] = useState<ChartDataState>(() => getMockChartData("1M"));
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -71,10 +89,10 @@ export function PriceChart() {
     const days = TIMEFRAME_TO_DAYS[tf] ?? 7;
     try {
       const raw = await fetchEthUsdOhlc(days);
-      const { candles, volume } = coingeckoOhlcToChart(raw);
-      const summary = getOhlcvSummary(candles);
+      const { points, volume } = coingeckoOhlcToChart(raw);
+      const summary = getOhlcvSummary(points);
       setChartData({
-        candles,
+        points,
         volume,
         summary: { ...summary, volumePct: 0.02, amplitudePct: summary.amplitudePct || 0 },
       });
@@ -90,87 +108,86 @@ export function PriceChart() {
     loadData(timeframe);
   }, [timeframe, loadData]);
 
-  useEffect(() => {
-    if (!containerRef.current) return;
-
-    const chart = createChart(containerRef.current, {
-      autoSize: true,
-      layout: {
-        background: { type: ColorType.Solid, color: "#0f172a" },
-        textColor: "#94a3b8",
-      },
-      grid: {
-        vertLines: { color: "#1e293b" },
-        horzLines: { color: "#1e293b" },
-      },
-      rightPriceScale: {
-        borderColor: "#334155",
-        scaleMargins: { top: 0.1, bottom: 0.25 },
-      },
-      timeScale: {
-        borderColor: "#334155",
-        timeVisible: true,
-        secondsVisible: false,
-      },
-      crosshair: {
-        mode: 1,
-        vertLine: { color: "#475569" },
-        horzLine: { color: "#475569" },
-      },
-    });
-
-    const candleSeries = chart.addSeries(CandlestickSeries, {
-      upColor: "#22c55e",
-      downColor: "#ef4444",
-      borderUpColor: "#22c55e",
-      borderDownColor: "#ef4444",
-    });
-
-    const volumeSeries = chart.addSeries(HistogramSeries, {
-      color: "#26a69a",
-      priceFormat: { type: "volume" },
-    });
-    volumeSeries.priceScale().applyOptions({
-      scaleMargins: { top: 0.85, bottom: 0 },
-      borderVisible: false,
-    });
-
-    candleSeries.setData(chartData.candles);
-    volumeSeries.setData(chartData.volume);
-
-    chart.timeScale().fitContent();
-    chart.applyOptions({ attributionLogo: false } as Parameters<IChartApi["applyOptions"]>[0]);
-
-    chartRef.current = chart;
-    candleSeriesRef.current = candleSeries;
-    volumeSeriesRef.current = volumeSeries;
-
-    return () => {
-      chart.remove();
-      chartRef.current = null;
-      candleSeriesRef.current = null;
-      volumeSeriesRef.current = null;
+  const chartDataConfig = useMemo(() => {
+    const { points, volume } = chartData;
+    const priceData = points.map((p) => ({ x: p.time * 1000, y: p.close }));
+    const volumeData = volume.map((v) => ({ x: v.time * 1000, y: v.value }));
+    return {
+      datasets: [
+        {
+          type: "line" as const,
+          label: "Price",
+          data: priceData,
+          borderColor: "#22c55e",
+          backgroundColor: "rgba(34, 197, 94, 0.1)",
+          fill: true,
+          yAxisID: "y",
+          tension: 0.1,
+          pointRadius: 0,
+          pointHoverRadius: 4,
+        },
+        {
+          type: "bar" as const,
+          label: "Volume",
+          data: volumeData,
+          backgroundColor: "rgba(38, 166, 154, 0.5)",
+          yAxisID: "y1",
+          order: 0,
+        },
+      ],
     };
-    // Chart is created per timeframe; data updates are applied in the effect below.
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- chartData applied in separate effect
-  }, [timeframe]);
+  }, [chartData.points, chartData.volume]);
 
-  useEffect(() => {
-    const chart = chartRef.current;
-    const candleSeries = candleSeriesRef.current;
-    const volumeSeries = volumeSeriesRef.current;
-    if (!chart || !candleSeries || !volumeSeries || !chartData.candles.length) return;
-    candleSeries.setData(chartData.candles);
-    volumeSeries.setData(chartData.volume);
-    chart.timeScale().fitContent();
-  }, [chartData.candles, chartData.volume]);
+  const chartOptions = useMemo(
+    () => ({
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: "index" as const, intersect: false },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: "#1e293b",
+          titleColor: "#94a3b8",
+          bodyColor: "#c8cdd4",
+          callbacks: {
+            label: (ctx: { dataset: { label?: string }; parsed: { y: number } }) =>
+              ctx.dataset.label === "Price"
+                ? `$${ctx.parsed.y.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                : `Vol: ${ctx.parsed.y.toLocaleString()}`,
+          },
+        },
+      },
+      scales: {
+        x: {
+          type: "time" as const,
+          time: { unit: "minute" as const },
+          grid: { color: "#1e293b" },
+          ticks: { color: "#94a3b8", maxTicksLimit: 8 },
+        },
+        y: {
+          type: "linear" as const,
+          position: "left" as const,
+          grid: { color: "#1e293b" },
+          ticks: { color: "#94a3b8" },
+        },
+        y1: {
+          type: "linear" as const,
+          position: "right" as const,
+          grid: { drawOnChartArea: false },
+          ticks: { color: "#64748b", maxTicksLimit: 4 },
+        },
+      },
+    }),
+    []
+  );
 
-  const formatPrice = (p: number) => p.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const formatPrice = (p: number) =>
+    p.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const utcTime = new Date().toISOString().slice(11, 19) + " UTC";
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-      {/* Top controls - square buttons, no borders */}
+      {/* Top controls */}
       <div className="flex items-center justify-between gap-2 border-b border-[#363d4a] py-1.5">
         <div className="flex items-center gap-1">
           <button
@@ -252,8 +269,10 @@ export function PriceChart() {
         <span><strong className="text-[#c8cdd4]">Amplitude:</strong> {chartData.summary.amplitudePct.toFixed(2)}%</span>
       </div>
 
-      {/* Chart - fills remaining height, no gap below */}
-      <div ref={containerRef} className="min-h-0 h-full w-full flex-1 self-stretch" />
+      {/* Chart - Chart.js */}
+      <div className="min-h-50 h-full w-full flex-1 self-stretch bg-[#0f172a]">
+        <Chart type="line" data={chartDataConfig} options={chartOptions} />
+      </div>
 
       {/* Bottom bar */}
       <div className="flex items-center justify-between border-t border-[#363d4a] px-2 py-1 text-xs text-[#7d8590]">

@@ -71,3 +71,33 @@ export function getOhlcvSummary(
   };
 }
 
+export type DepthLevel = { price: number; size: number };
+
+/**
+ * Generate mock order book depth (bids and asks) for the depth chart.
+ */
+export function generateDepthData(
+  midPrice: number,
+  levels: number
+): { bids: DepthLevel[]; asks: DepthLevel[] } {
+  const rand = seeded(SEED + 1);
+  const spread = midPrice * 0.0002;
+  const bids: DepthLevel[] = [];
+  const asks: DepthLevel[] = [];
+  for (let i = 0; i < levels; i++) {
+    const bidOffset = (i + 1) * (midPrice * 0.0001) * (0.9 + rand() * 0.2);
+    const askOffset = (i + 1) * (midPrice * 0.0001) * (0.9 + rand() * 0.2);
+    bids.push({
+      price: midPrice - spread - bidOffset,
+      size: Math.round((rand() * 5 + 1) * 100) / 100,
+    });
+    asks.push({
+      price: midPrice + spread + askOffset,
+      size: Math.round((rand() * 5 + 1) * 100) / 100,
+    });
+  }
+  bids.sort((a, b) => b.price - a.price);
+  asks.sort((a, b) => a.price - b.price);
+  return { bids, asks };
+}
+

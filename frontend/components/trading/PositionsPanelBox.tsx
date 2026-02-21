@@ -291,7 +291,7 @@ export function PositionsPanelBox() {
   };
 
   return (
-    <section className="flex min-h-[180px] shrink-0 flex-col overflow-hidden border-t border-[#363d4a] bg-[#21262e]">
+    <section className="flex min-h-0 flex-1 flex-col overflow-hidden border-t border-[#363d4a] bg-[#21262e]">
       {/* Tabs + All Markets filter - square tabs, no curve */}
       <div className="flex shrink-0 items-center justify-between border-b border-[#363d4a] px-2 py-1.5">
         <div className="flex items-center gap-1 overflow-x-auto">
