@@ -291,6 +291,38 @@ Gets the batch interval from the Hook contract.
 
 ---
 
+## Order status: Pending vs Executed
+
+**Why orders are "pending"**
+
+When a user submits a **reveal** (`POST /api/perp/reveal`), the backend stores the order in the database with `status: "pending"`. Orders stay pending because execution is **batched**: multiple reveals are executed on-chain in a single transaction. Until that batch runs, every order in it remains pending.
+
+**What makes them "executed" (success)**
+
+An order moves to `status: "executed"` only after:
+
+1. **Batch execution runs** – Either:
+   - **Manual:** Call **POST /api/perp/execute** (e.g. from the app’s Execute page). No body required; it uses the default pool and pending reveals from the DB.
+   - **Manual (custom):** Call **POST /api/perp/execute-batch** with optional `commitmentHashes` and `poolKey`.
+   - **Automatic:** The **keeper** (when `KEEPER_PRIVY_USER_ID` is set) runs on an interval and executes when conditions are met. The keeper now also updates order status and writes trade history.
+
+2. **Conditions for execution to succeed:**
+   - At least **2 pending commitments** for the pool (see `GET /api/perp/pending-batch` for `count` and `canExecute`).
+   - **Batch interval** has passed since the last execution (e.g. 5 minutes). `pending-batch` returns `nextExecutionAt` and `canExecute`.
+   - Executor wallet is set up (linked via `/api/auth/link` and addSigners).
+   - **Hook has enough quote (USDC)** to settle the perp swap. The backend (or keeper) will transfer from the executor wallet to the Hook if needed; if the executor has insufficient USDC, execution returns an error.
+   - **Pool is initialized** and has liquidity (otherwise simulation can revert with division by zero; see `POOL_SETUP.md`).
+
+After a successful execution, the backend:
+
+- Deletes those commitment hashes from `pendingPerpReveals`
+- Updates each matching document in `perpOrders` to `status: "executed"` and sets `executedAt`, `txHash`
+- Inserts one record per order into `perpTrades` (trade history)
+
+So to get pending orders to success: ensure at least 2 pending reveals, wait until the batch interval has passed, then run **POST /api/perp/execute** (or rely on the keeper). Ensure the executor has enough USDC and the pool has liquidity.
+
+---
+
 ## Error Responses
 
 All endpoints may return the following error responses:

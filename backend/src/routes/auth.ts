@@ -24,9 +24,7 @@ async function handleVerifyToken(accessToken: string, res: Response, endpoint: s
       return;
     }
 
-    console.log(`[${endpoint}] Verifying access token (length: ${accessToken.length})`);
     const info = await verifyAccessToken(accessToken);
-    console.log(`[${endpoint}] Token verified successfully:`, { userId: info.userId, hasWallet: !!info.walletAddress });
     const signerId = getSignerIdForFrontend();
     
     if (info.walletAddress) {

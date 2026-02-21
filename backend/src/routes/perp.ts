@@ -51,6 +51,7 @@ import {
   getPerpTradesCollection,
 } from "../lib/db.js";
 import { config } from "../config.js";
+import { tryExecuteBatchIfReady } from "../lib/keeper.js";
 
 /** Normalize intent fields that may be string to bigint for contract calls */
 function intentToBigint(intent: PerpIntent): {
@@ -393,11 +394,17 @@ perpRouter.post("/reveal", async (req: AuthRequest, res: Response): Promise<void
         updatedAt: now,
       });
       console.log("[Perp] Stored pending reveal and order (poolId: %s) intent size=%s collateral=%s leverage=%s", poolId.slice(0, 18) + "...", String(intentForTx.size), String(intentForTx.collateral), String(intentForTx.leverage));
-      // Batch execute only via keeper after BATCH_INTERVAL (5 min), like E2E — no instant execute on reveal
     } catch (dbErr) {
       // Reveal already succeeded on-chain; tracking is best-effort (e.g. no MongoDB or duplicate commitmentHash)
       console.warn("[Perp] Could not store pending reveal/order for batch:", dbErr);
     }
+
+    // Auto-execute batch when ready (2+ pending and batch interval passed). Fire-and-forget so response returns immediately.
+    tryExecuteBatchIfReady(
+      { walletId: walletSetup.walletId!, walletAddress: walletSetup.walletAddress },
+      "post-reveal",
+      poolKey,
+    ).catch((err) => console.warn("[Perp] Post-reveal auto-execute check failed:", err));
 
     res.json({ hash: result.hash });
   } catch (e) {
@@ -650,23 +657,7 @@ perpRouter.post("/execute", async (req: AuthRequest, res: Response): Promise<voi
       return;
     }
 
-    const [batchState, batchInterval] = await Promise.all([
-      getBatchState(poolId),
-      getBatchInterval(),
-    ]);
-    const nowSec = Math.floor(Date.now() / 1000);
-    const intervalSec = Number(batchInterval);
-    const lastBatchSec = Number(batchState.lastBatchTimestamp);
-    const nextExecutionSec = lastBatchSec === 0 ? nowSec : lastBatchSec + intervalSec;
-    if (nowSec < nextExecutionSec) {
-      res.status(400).json({
-        error: "Batch interval not met. Wait until the next execution time.",
-        nextExecutionAt: new Date(nextExecutionSec * 1000).toISOString(),
-        batchIntervalSeconds: intervalSec,
-      });
-      return;
-    }
-
+    // Execute as soon as we have 2+ commitments (no batch interval wait)
     const baseIsCurrency0Value = config.baseIsCurrency0;
 
     // Fund Hook with quote if needed (see scripts/zk/test-perp-e2e.js step 5.6).
@@ -869,29 +860,14 @@ perpRouter.get("/pending-batch", async (_req: AuthRequest, res: Response): Promi
       console.warn("[Perp] Pending-batch: could not read pending reveals:", dbErr);
     }
 
-    const [batchState, batchInterval] = await Promise.all([
-      getBatchState(poolId),
-      getBatchInterval(),
-    ]);
-    const nowSec = Math.floor(Date.now() / 1000);
-    const intervalSec = Number(batchInterval);
-    const lastBatchSec = Number(batchState.lastBatchTimestamp);
-    const nextExecutionSec = lastBatchSec === 0 ? nowSec : lastBatchSec + intervalSec;
-    const canExecute =
-      commitmentHashes.length >= MIN_COMMITMENTS && nowSec >= nextExecutionSec;
-    const nextExecutionAt =
-      commitmentHashes.length >= MIN_COMMITMENTS
-        ? new Date(nextExecutionSec * 1000).toISOString()
-        : null;
+    const canExecute = commitmentHashes.length >= MIN_COMMITMENTS;
 
     res.json({
       poolId,
       commitmentHashes,
       count: commitmentHashes.length,
       canExecute,
-      nextExecutionAt,
-      lastBatchTimestamp: batchState.lastBatchTimestamp.toString(),
-      batchIntervalSeconds: intervalSec,
+      nextExecutionAt: canExecute ? new Date().toISOString() : null,
       minCommitments: MIN_COMMITMENTS,
     });
   } catch (e) {

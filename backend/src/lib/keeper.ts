@@ -5,9 +5,9 @@
  */
 import { decodeErrorResult } from "viem";
 import { config } from "../config.js";
-import { getPendingPerpRevealsCollection, getPerpOrdersCollection } from "./db.js";
+import { getPendingPerpRevealsCollection, getPerpOrdersCollection, getPerpTradesCollection } from "./db.js";
 import { buildPoolKey, computePoolId, encodeRevealAndBatchExecutePerps, encodeErc20Transfer, contractAddresses, type PoolKey } from "./contracts.js";
-import { getBatchState, getBatchInterval, getPublicClient, getTokenBalance, getPoolSlot0SqrtPriceX96, getPoolLiquidity, getHookPoolManager } from "./contract-reader.js";
+import { getPublicClient, getTokenBalance, getPoolSlot0SqrtPriceX96, getPoolLiquidity, getHookPoolManager } from "./contract-reader.js";
 import { verifyWalletSetup } from "./privy.js";
 import { sendTransactionAsUser } from "./send-transaction.js";
 
@@ -58,14 +58,12 @@ export async function tryExecuteBatchIfReady(
     const poolId = computePoolId(poolKey);
 
     let commitmentHashes: string[] = [];
-    let oldestRevealCreatedAt: Date | undefined;
     try {
       const docs = await getPendingPerpRevealsCollection()
         .find({ poolId })
         .sort({ createdAt: 1 })
         .toArray();
       commitmentHashes = docs.map((d) => d.commitmentHash);
-      if (docs.length > 0) oldestRevealCreatedAt = docs[0].createdAt;
     } catch (dbErr) {
       return false;
     }
@@ -85,31 +83,7 @@ export async function tryExecuteBatchIfReady(
       return false;
     }
 
-    const [batchState, batchInterval] = await Promise.all([
-      getBatchState(poolId),
-      getBatchInterval(),
-    ]);
-    const nowSec = Math.floor(Date.now() / 1000);
-    const intervalSec = Number(batchInterval);
-    const lastBatchSec = Number(batchState.lastBatchTimestamp);
-    const nextExecutionSec = lastBatchSec === 0 ? nowSec : lastBatchSec + intervalSec;
-    if (nowSec < nextExecutionSec) {
-      const waitSec = nextExecutionSec - nowSec;
-      console.log("[Perp] Batch%s: detected %d commitment(s) — batch interval not reached (wait %ds)", label, commitmentHashes.length, waitSec);
-      return false;
-    }
-
-    // Match E2E: wait BATCH_INTERVAL after oldest reveal before executing (script waits 5 min then revealAndBatchExecutePerps)
-    if (oldestRevealCreatedAt != null) {
-      const oldestSec = Math.floor(new Date(oldestRevealCreatedAt).getTime() / 1000);
-      const batchReadySec = oldestSec + intervalSec;
-      if (nowSec < batchReadySec) {
-        const waitSec = batchReadySec - nowSec;
-        console.log("[Perp] Batch%s: detected %d commitment(s) — waiting %ds after oldest reveal (like E2E) before execute", label, commitmentHashes.length, waitSec);
-        return false;
-      }
-    }
-
+    // Execute as soon as we have 2+ commitments (no batch interval wait)
     console.log("[Perp] Batch%s: detected %d commitment(s), executing now (poolId: %s)", label, commitmentHashes.length, poolId);
     console.log("[Perp] Batch%s: commitment hashes: %s", label, commitmentHashes.map((h) => h.slice(0, 18) + "...").join(", "));
 
@@ -281,6 +255,46 @@ export async function tryExecuteBatchIfReady(
       poolId,
       commitmentHash: { $in: commitmentHashes },
     });
+
+    // Mark orders executed and create trade history (same as POST /api/perp/execute)
+    const executedAt = new Date();
+    try {
+      const ordersColl = getPerpOrdersCollection();
+      const tradesColl = getPerpTradesCollection();
+      const executedOrders = await ordersColl
+        .find({ commitmentHash: { $in: commitmentHashes }, status: "pending" })
+        .toArray();
+      for (const order of executedOrders) {
+        await ordersColl.updateOne(
+          { commitmentHash: order.commitmentHash },
+          {
+            $set: {
+              status: "executed",
+              updatedAt: executedAt,
+              executedAt,
+              txHash: result.hash,
+            },
+          },
+        );
+        await tradesColl.insertOne({
+          privyUserId: order.privyUserId,
+          walletAddress: order.walletAddress,
+          market: order.market,
+          size: order.size,
+          isLong: order.isLong,
+          isOpen: order.isOpen,
+          collateral: order.collateral,
+          leverage: order.leverage,
+          entryPrice: null,
+          txHash: result.hash,
+          executedAt,
+          poolId: order.poolId,
+          commitmentHash: order.commitmentHash,
+        });
+      }
+    } catch (dbErr) {
+      console.warn("[Perp] Batch%s: could not update orders/trades after execute:", label, dbErr);
+    }
 
     console.log("[Perp] Batch%s: executed successfully", label, { txHash: result.hash, batchSize: commitmentHashes.length });
     return true;

@@ -88,6 +88,20 @@ export default function Home() {
                 strokeWidth="0.5"
               />
             </pattern>
+            {/* Faint grey box grid for content sections */}
+            <pattern
+              id="sectionGrid"
+              width="32"
+              height="32"
+              patternUnits="userSpaceOnUse"
+            >
+              <path
+                d="M 32 0 L 0 0 0 32"
+                fill="none"
+                stroke="rgba(255,255,255,0.06)"
+                strokeWidth="0.5"
+              />
+            </pattern>
           </defs>
           <rect width="100%" height="100%" fill="url(#grid)" />
         </svg>
@@ -304,9 +318,17 @@ export default function Home() {
           {/* What is ZK Perps */}
           <section
             id="about"
-            className="border-t border-white/[0.06] px-4 py-20 sm:px-6 sm:py-24"
+            className="relative border-t border-white/[0.06] px-4 py-20 sm:px-6 sm:py-24"
           >
-            <div className="mx-auto max-w-4xl">
+            <div
+              className="pointer-events-none absolute inset-0 z-0"
+              aria-hidden
+            >
+              <svg className="h-full w-full" xmlns="http://www.w3.org/2000/svg">
+                <rect width="100%" height="100%" fill="url(#sectionGrid)" />
+              </svg>
+            </div>
+            <div className="relative z-10 mx-auto max-w-4xl">
               <h2 className="text-2xl font-semibold tracking-tight text-white sm:text-3xl">
                 What is ZK Perps?
               </h2>
@@ -343,9 +365,17 @@ export default function Home() {
           {/* Features */}
           <section
             id="features"
-            className="border-t border-white/[0.06] px-4 py-20 sm:px-6 sm:py-24"
+            className="relative border-t border-white/[0.06] px-4 py-20 sm:px-6 sm:py-24"
           >
-            <div className="mx-auto max-w-5xl">
+            <div
+              className="pointer-events-none absolute inset-0 z-0"
+              aria-hidden
+            >
+              <svg className="h-full w-full" xmlns="http://www.w3.org/2000/svg">
+                <rect width="100%" height="100%" fill="url(#sectionGrid)" />
+              </svg>
+            </div>
+            <div className="relative z-10 mx-auto max-w-5xl">
               <h2 className="text-2xl font-semibold tracking-tight text-white sm:text-3xl">
                 Features
               </h2>
@@ -372,9 +402,17 @@ export default function Home() {
           </section>
 
           {/* CTA */}
-          <section className="border-t border-white/[0.06] px-4 py-20 sm:px-6 sm:py-24">
+          <section className="relative border-t border-white/[0.06] px-4 py-20 sm:px-6 sm:py-24">
             <div
-              className="mx-auto max-w-3xl border border-white/10 bg-white/[0.02] p-10 text-center sm:p-14"
+              className="pointer-events-none absolute inset-0 z-0"
+              aria-hidden
+            >
+              <svg className="h-full w-full" xmlns="http://www.w3.org/2000/svg">
+                <rect width="100%" height="100%" fill="url(#sectionGrid)" />
+              </svg>
+            </div>
+            <div
+              className="relative z-10 mx-auto max-w-3xl border border-white/10 bg-white/[0.02] p-10 text-center sm:p-14"
               style={{ borderRadius: 0 }}
             >
               <h2 className="text-2xl font-semibold tracking-tight text-white sm:text-3xl">
