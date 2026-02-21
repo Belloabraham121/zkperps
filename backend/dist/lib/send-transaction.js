@@ -17,6 +17,11 @@ import { createPrivateKey } from "crypto";
 import { getPrivyClient } from "./privy.js";
 import { config } from "../config.js";
 const caip2 = `eip155:${config.chainId}`;
+/** Normalize PEM: literal \n -> newline, collapse spaces/newlines into single newlines (valid PEM). */
+function normalizePemString(raw) {
+    const withNewlines = raw.replace(/\\n/g, "\n").trim();
+    return withNewlines.replace(/\s+/g, "\n");
+}
 /**
  * Normalize PEM string from env (e.g. newlines stored as literal \n) and convert to
  * the format Privy expects: base64-encoded PKCS8 DER with no PEM headers/footers.
@@ -51,13 +56,18 @@ function pemToPkcs8Base64(pem) {
 function getAuthorizationPrivateKey() {
     const fromEnv = config.privy.authorizationPrivateKey;
     if (fromEnv) {
-        // Allow newlines stored as literal \n in env (e.g. single-line paste)
-        const pem = fromEnv.replace(/\\n/g, "\n").trim();
+        const pem = normalizePemString(fromEnv);
         return pemToPkcs8Base64(pem);
     }
     const path = config.privy.authorizationPrivateKeyPath;
     if (!path) {
         throw new Error("Set AUTHORIZATION_PRIVATE_KEY (PEM string) or AUTHORIZATION_PRIVATE_KEY_PATH to send transactions");
+    }
+    // If path looks like PEM content (e.g. user pasted key into AUTHORIZATION_PRIVATE_KEY_PATH by mistake), use it directly
+    const pathTrimmed = path.trim();
+    if (pathTrimmed.includes("-----BEGIN")) {
+        const pem = normalizePemString(pathTrimmed);
+        return pemToPkcs8Base64(pem);
     }
     const pem = readFileSync(path, "utf8").trim();
     if (!pem) {
