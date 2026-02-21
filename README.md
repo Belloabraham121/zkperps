@@ -1,14 +1,25 @@
-# PrivBatch — Private Batch Swaps on Uniswap V4
+# zkperps
 
-> **Autonomous trading agents + commit-reveal privacy + zero-knowledge proofs on Uniswap V4**
+> **Private perpetual futures + commit-reveal batch execution on Uniswap V4**
 
-PrivBatch is an **Agentic Finance** system that enables **private, batched token swaps** on Uniswap V4. Autonomous trading agents monitor on-chain pools, make strategy-driven trading decisions, and submit their trades through a privacy-preserving **commit-reveal** mechanism backed by **zero-knowledge proofs (ZKPs)**. Individual trade details (amounts, directions, recipients) are never publicly visible in batch execution calldata — only aggregate net deltas reach the AMM.
+**zkperps** is a full-stack system for **perpetual futures trading** (e.g. ETH/USD) with **privacy-preserving batch execution**. Users trade via a web app; orders are committed and revealed through a **commit-reveal** flow backed by **zero-knowledge proofs (ZKPs)**. The same infrastructure supports **autonomous trading agents** that submit private batched swaps on Uniswap V4. Individual trade details are not visible in batch calldata — only aggregate net deltas hit the AMM.
+
+### What’s in this repo
+
+| Layer | What it does |
+|-------|----------------|
+| **Frontend** | Next.js trading UI: ETH/USD price (CoinGecko), chart, order panel (leverage/size/margin), positions, open orders, account summary. Privy email login; backend signs for the user. |
+| **Backend** | Express API: auth (Privy JWT), perp intents (commit → reveal → execute batch), positions, collateral. Server-side signing so users don’t sign every tx. |
+| **Contracts** | Uniswap V4 **PrivBatchHook** (commit-reveal + ZK), **PerpPositionManager** (positions, margin, funding, liquidation), mock USDC/USDT, pool setup. |
+| **Agents** | TypeScript trading agents (momentum, arbitrage, etc.) that monitor pools and submit private batch swaps. |
+| **ZK** | Circom circuits + Groth16 proofs for commitment validity; proofs verified on-chain. |
 
 ---
 
 ## Table of Contents
 
 - [Overview](#overview)
+- [Perpetuals Trading (zkperps)](#perpetuals-trading-zkperps)
 - [Architecture](#architecture)
   - [System Diagram](#system-diagram)
   - [Agent Architecture](#agent-architecture)
@@ -58,13 +69,36 @@ PrivBatch solves this by combining three innovations:
 
 ---
 
+## Perpetuals Trading (zkperps)
+
+Users trade **ETH/USD perpetuals** in a web app. The flow is:
+
+1. **Sign in** with email (Privy); the app gets a JWT and an embedded wallet.
+2. **Order panel**: set leverage (1x–10x), size (e.g. 0.1 ETH), margin (USDC). **Value** (size × price) and **Est. Liq. Price** are computed live (price from CoinGecko; liq. formula matches `PerpPositionManager`).
+3. **Open Long / Open Short**: the frontend sends a **perp intent** to the backend. The backend **commits** (hash) and **reveals** (intent) to the PrivBatchHook; when the batch is ready, it **executes** the batch. The Hook calls **PerpPositionManager** to open/close positions.
+4. **Positions & account**: positions, open orders, collateral, and balances are read from the backend/contracts and shown in the UI. The **positions** panel is resizable (drag the bar above it).
+
+### Tech stack (perps)
+
+- **Frontend**: Next.js, React Query, Privy, Chart.js (price chart), CoinGecko (ETH price + 24h change for the market bar).
+- **Backend**: Express, Privy (auth + server-side signing), perp API (commit, reveal, execute batch, positions, collateral). See `backend/PERP_API_DOCUMENTATION.md`.
+- **Contracts**: `PerpPositionManager` (positions, margin, funding, liquidation), oracle adapter for mark price; Hook integrates with the same commit-reveal + ZK flow.
+
+### Running the trading app
+
+1. **Backend**: `cd backend && cp .env.example .env` (set Privy, JWT, RPC, contract addresses), then `npm run dev`.
+2. **Frontend**: `cd frontend && cp .env.example .env.local` (set `NEXT_PUBLIC_API_URL`, Privy app ID, optional CoinGecko key), then `npm run dev`. Open [http://localhost:3000](http://localhost:3000), sign in, go to **Trade**.
+3. **Chain**: Backend defaults to **Arbitrum Sepolia** (421614). Deploy contracts and set addresses in backend/frontend env (see backend README and `contracts/script/`).
+
+---
+
 ## Architecture
 
 ### System Diagram
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────────┐
-│                         PrivBatch System Architecture                        │
+│                    zkperps / PrivBatch System Architecture                   │
 ├──────────────────────────────────────────────────────────────────────────────┤
 │                                                                              │
 │  ┌─────────────────────────────────────────────────────────────────────┐     │
@@ -382,7 +416,20 @@ The `PrivBatchHook` is a Uniswap V4 hook that intercepts swap operations and imp
 ## Project Structure
 
 ```
-privbatch/
+zkperps/
+├── frontend/                      # 🌐 Trading UI (Next.js)
+│   ├── app/                       #    App router (/, /trade)
+│   ├── components/                #    Layout, auth, trading (chart, order panel, positions)
+│   ├── hooks/                     #    useMarketStats, useTrading, usePositions, useAccount
+│   ├── lib/                       #    API client (perp), CoinGecko, config, utils
+│   ├── PERP_INTEGRATION.md        #    Perp frontend integration notes
+│   └── package.json
+│
+├── backend/                       # 🔧 API + server-side signing (Express)
+│   ├── src/                       #    Routes (auth, perp), Privy, contract calls
+│   ├── PERP_API_DOCUMENTATION.md  #    Perp API reference
+│   └── package.json
+│
 ├── agents/                        # 🤖 Autonomous Trading Agents (TypeScript)
 │   ├── run.ts                     #    Entry point — boots and runs the agent
 │   ├── PrivBatchAgent.ts          #    Concrete agent (MarketDataFetcher + Strategy)
@@ -417,22 +464,26 @@ privbatch/
 │   └── tsconfig.json
 │
 ├── contracts/                     # 📜 Solidity Smart Contracts (Foundry)
-│   ├── PrivBatchHook.sol          #    Main hook — commit-reveal-batch logic
+│   ├── PrivBatchHook.sol          #    Main hook — commit-reveal-batch + perp batch execution
+│   ├── PerpPositionManager.sol    #    Perp positions, margin, funding, liquidation
+│   ├── ChainlinkOracleAdapter.sol #    Oracle adapter for perp mark price
 │   ├── CommitmentVerifier.sol     #    Auto-generated Groth16 verifier
 │   ├── MockUSDT.sol               #    Mock USDT token (18 decimals)
 │   ├── MockUSDC.sol               #    Mock USDC token (6 decimals)
 │   ├── lib/
 │   │   └── SimpleERC20.sol        #    Minimal ERC20 base
 │   ├── script/
-│   │   ├── DeployPrivBatchHook.s.sol    # Deploy hook + verifier
-│   │   ├── DeployMockUSDT.s.sol         # Deploy mock USDT
-│   │   ├── DeployMockUSDC.s.sol         # Deploy mock USDC
-│   │   ├── SetupPoolLiquidity.s.sol     # Initialize pool + add liquidity
-│   │   ├── ExecuteBatch.s.sol           # Execute batch swap
-│   │   └── MonitorAndExecute.s.sol      # Monitor + auto-execute
+│   │   ├── Deploy.s.sol           #    Deploy hook, verifier, tokens, pool, perp
+│   │   ├── DeployMockUSDT.s.sol  #    Deploy mock USDT
+│   │   ├── DeployMockUSDC.s.sol  #    Deploy mock USDC
+│   │   ├── SetupPoolLiquidity.s.sol  # Initialize pool + add liquidity
+│   │   ├── SetPerpManager.s.sol  #    Set PerpPositionManager on Hook
+│   │   ├── AddMarket.s.sol       #    Add perp market (ETH/USD, etc.)
+│   │   └── ...
 │   ├── test/
-│   │   ├── PrivBatchHookZK.t.sol        # ZK integration tests
-│   │   └── CommitmentVerifier.t.sol     # Verifier tests
+│   │   ├── PrivBatchHookZK.t.sol #    ZK integration tests
+│   │   ├── PerpPositionManager.t.sol  # Perp + liquidation tests
+│   │   └── PerpBatchExecution.t.sol   # Perp batch execution tests
 │   ├── foundry.toml               #    Foundry configuration
 │   └── remappings.txt             #    Solidity import remappings
 │
@@ -443,12 +494,13 @@ privbatch/
 ├── scripts/zk/                    # 🛠️ ZK Proof Scripts (Node.js)
 │   ├── generate-proof.js          #    Off-chain proof generation
 │   ├── test-proof-generation.js   #    Proof generation tests
-│   ├── test-end-to-end-zk-flow.js #   Full E2E ZK flow test
+│   ├── test-end-to-end-zk-flow.js #    Full E2E ZK flow test
+│   ├── execute-perp-batch-from-mongo.js  # Execute perp batch from stored reveals
 │   └── package.json
 │
 ├── build/zk/                      # 🏗️ Compiled ZK Artifacts
 │   ├── commitment-proof.wasm      #    Circuit WASM
-│   ├── final.zkey                 #    Proving key
+│   ├── final.zkey                #    Proving key
 │   ├── vkey.json                  #    Verification key
 │   └── ...
 │
@@ -489,8 +541,8 @@ cargo install --git https://github.com/iden3/circom.git
 ### 1. Clone and install dependencies
 
 ```bash
-git clone <your-repo-url> privbatch
-cd privbatch
+git clone <your-repo-url> zkperps
+cd zkperps
 ```
 
 ### 2. Install contract dependencies
@@ -501,7 +553,23 @@ forge install
 cd ..
 ```
 
-### 3. Install agent dependencies
+### 3. Install frontend dependencies
+
+```bash
+cd frontend
+npm install
+cd ..
+```
+
+### 4. Install backend dependencies
+
+```bash
+cd backend
+npm install
+cd ..
+```
+
+### 5. Install agent dependencies
 
 ```bash
 cd agents
@@ -509,7 +577,7 @@ npm install
 cd ..
 ```
 
-### 4. Install ZK script dependencies
+### 6. Install ZK script dependencies
 
 ```bash
 cd scripts/zk
@@ -517,7 +585,7 @@ npm install
 cd ../..
 ```
 
-### 5. Install circuit dependencies (optional — only if recompiling circuits)
+### 7. Install circuit dependencies (optional — only if recompiling circuits)
 
 ```bash
 cd circuits
@@ -528,6 +596,15 @@ cd ..
 ---
 
 ## Running the Project
+
+### Quick start: trading app (after contracts are deployed)
+
+1. **Backend**: In `backend/`, copy `.env.example` to `.env`, set Privy credentials, JWT secret, RPC URL, and contract addresses. Run `npm run dev`.
+2. **Frontend**: In `frontend/`, copy `.env.example` to `.env.local`, set `NEXT_PUBLIC_API_URL` (e.g. `http://localhost:4000`), Privy App ID, and optionally `NEXT_PUBLIC_COINGECKO_API_KEY`. Run `npm run dev` and open [http://localhost:3000](http://localhost:3000). Sign in with email and go to **Trade** to use the perp UI.
+
+See [Perpetuals Trading (zkperps)](#perpetuals-trading-zkperps) and `backend/README.md` / `backend/PERP_API_DOCUMENTATION.md` for API and env details.
+
+---
 
 ### 1. Deploy Contracts (Foundry)
 
@@ -859,6 +936,8 @@ npm run test-e2e      # Full end-to-end ZK flow
 |----------|-----------|
 | **Poseidon hash** (not Keccak256) in ZK circuits | ~150x fewer constraints than Keccak in ZK proofs |
 | **Separate reveal transactions** | Individual intents are never in batch execution calldata |
+| **Server-side signing (Privy)** | Users sign in with email; backend holds authorization key and signs perp/swap txs so users don’t sign every action |
+| **PerpPositionManager + Hook** | Perp opens/closes run through the same Hook batch flow; positions, margin, and liquidation live in a separate manager contract |
 | **`extsload`** for pool state reads | Uniswap V4 stores state in PoolManager slots; no public getter functions |
 | **10-block `eth_getLogs` range** | Compatible with Alchemy free tier rate limits |
 | **`via_ir = true`** in Foundry | Resolves "stack too deep" in complex hook contract |

@@ -1,10 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { useAuth } from "@/lib/auth";
 import { useOpenPosition } from "@/hooks/useTrading";
-import { createPerpIntent } from "@/lib/utils/perp";
+import { useMarketStats } from "@/hooks/useMarketStats";
+import { createPerpIntent, estimateLiquidationPriceUSD } from "@/lib/utils/perp";
 import { DEFAULT_MARKET_ID, DEFAULT_POOL_KEY } from "@/lib/config";
 import * as perpApi from "@/lib/api/perp";
 
@@ -22,6 +23,7 @@ const LEVERAGE_MAX = 10;
 export function OrderPanelBox() {
   const { user, token, isAuthenticated } = useAuth();
   const openPosition = useOpenPosition();
+  const { data: marketStats } = useMarketStats("ethereum");
 
   const [side, setSide] = useState<Side>("long");
   const [leverage, setLeverage] = useState(10);
@@ -29,6 +31,27 @@ export function OrderPanelBox() {
   const [margin, setMargin] = useState("");
   const [errors, setErrors] = useState<{ size?: string; margin?: string }>({});
   const [clearing, setClearing] = useState(false);
+
+  const priceUSD = marketStats?.price ?? 0;
+  const sizeNum = parseFloat(size) || 0;
+  const marginNum = parseFloat(margin) || 0;
+
+  const { valueUSD, estLiqPriceUSD } = useMemo(() => {
+    const value = priceUSD > 0 && sizeNum > 0 ? sizeNum * priceUSD : null;
+    const liq =
+      priceUSD > 0 && sizeNum > 0 && marginNum >= 0
+        ? estimateLiquidationPriceUSD({
+            sizeBaseAsset: sizeNum,
+            collateralUSD: marginNum,
+            entryPriceUSD: priceUSD,
+            isLong: side === "long",
+          })
+        : null;
+    return {
+      valueUSD: value != null ? value : null,
+      estLiqPriceUSD: liq,
+    };
+  }, [priceUSD, sizeNum, marginNum, side]);
 
   const validate = (): boolean => {
     const next: typeof errors = {};
@@ -176,6 +199,7 @@ export function OrderPanelBox() {
             type="submit"
             name="side"
             data-side="long"
+            onClick={() => setSide("long")}
             disabled={openPosition.isPending || !isAuthenticated}
             className="flex-1 bg-[#2d5a4a] py-2 text-sm font-medium text-white hover:bg-[#3d6a5a] disabled:cursor-not-allowed disabled:opacity-50"
           >
@@ -185,6 +209,7 @@ export function OrderPanelBox() {
             type="submit"
             name="side"
             data-side="short"
+            onClick={() => setSide("short")}
             disabled={openPosition.isPending || !isAuthenticated}
             className="flex-1 bg-[#5a3d3d] py-2 text-sm font-medium text-white hover:bg-[#6a4d4d] disabled:cursor-not-allowed disabled:opacity-50"
           >
@@ -202,9 +227,17 @@ export function OrderPanelBox() {
 
         <div className="grid grid-cols-2 gap-1 text-xs text-[#7d8590]">
           <span>Value</span>
-          <span className="text-right">—</span>
+          <span className="text-right font-medium text-[#c8cdd4]">
+            {valueUSD != null
+              ? `$${valueUSD.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+              : "—"}
+          </span>
           <span>Est. Liq. Price</span>
-          <span className="text-right">—</span>
+          <span className="text-right font-medium text-[#c8cdd4]">
+            {estLiqPriceUSD != null
+              ? `$${estLiqPriceUSD.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+              : "—"}
+          </span>
         </div>
 
         <div className="mt-3 border-t border-[#363d4a] pt-3">

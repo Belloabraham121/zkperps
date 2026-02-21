@@ -134,6 +134,45 @@ export function formatPositionSize(sizeStr: string, decimals: number = 18): stri
 }
 
 /**
+ * Estimate liquidation price for a proposed position (matches PerpPositionManager.getLiquidationPrice).
+ * Uses maintenance margin ratio (e.g. 0.05 = 5%). Returns price in USD or null if not liquidatable / invalid.
+ */
+export function estimateLiquidationPriceUSD(params: {
+  sizeBaseAsset: number;
+  collateralUSD: number;
+  entryPriceUSD: number;
+  isLong: boolean;
+  maintenanceMarginRatio?: number; // default 0.05 (5%)
+}): number | null {
+  const { sizeBaseAsset, collateralUSD, entryPriceUSD, isLong } = params;
+  const mm = params.maintenanceMarginRatio ?? 0.05;
+  if (sizeBaseAsset <= 0 || entryPriceUSD <= 0) return null;
+
+  const PRECISION = 10n ** 18n;
+  const absSize = BigInt(Math.round(sizeBaseAsset * 1e18));
+  const entryPrice = BigInt(Math.round(entryPriceUSD * 1e18));
+  const collateral = BigInt(Math.round(collateralUSD * 1e18));
+  const maintenanceMargin = BigInt(Math.round(mm * 1e18));
+
+  if (absSize === 0n) return null;
+
+  if (isLong) {
+    const num = (absSize * entryPrice) / PRECISION;
+    if (num <= collateral) return null;
+    const denom = absSize * (PRECISION - maintenanceMargin);
+    if (denom === 0n) return null;
+    const ratio = (num - collateral) * PRECISION / denom;
+    return Number(ratio);
+  } else {
+    const num = (absSize * entryPrice) / PRECISION + collateral;
+    const denom = absSize * (PRECISION + maintenanceMargin);
+    if (denom === 0n) return null;
+    const ratio = (num * PRECISION) / denom;
+    return Number(ratio);
+  }
+}
+
+/**
  * Calculate unrealized PnL
  */
 export function calculateUnrealizedPnL(

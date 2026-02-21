@@ -73,7 +73,6 @@ function getMockChartData(timeframe: (typeof TIMEFRAMES)[number]): ChartDataStat
 
 export function PriceChart() {
   const [timeframe, setTimeframe] = useState<(typeof TIMEFRAMES)[number]>("1M");
-  const [activeTab, setActiveTab] = useState<"Price" | "Funding">("Price");
   const [chartData, setChartData] = useState<ChartDataState>(() => getMockChartData("1M"));
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -224,20 +223,6 @@ export function PriceChart() {
           </div>
         </div>
         <div className="flex items-center gap-1">
-          <button
-            type="button"
-            onClick={() => setActiveTab("Price")}
-            className={`px-2 py-1 text-xs font-medium ${activeTab === "Price" ? "text-[#5b6b7a]" : "text-[#7d8590] hover:text-[#c8cdd4]"}`}
-          >
-            Price
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab("Funding")}
-            className={`px-2 py-1 text-xs font-medium ${activeTab === "Funding" ? "text-[#5b6b7a]" : "text-[#7d8590] hover:text-[#c8cdd4]"}`}
-          >
-            Funding
-          </button>
           <div className="flex gap-0.5">
             {["screenshot", "filter", "settings", "fullscreen", "share"].map((t) => (
               <button
