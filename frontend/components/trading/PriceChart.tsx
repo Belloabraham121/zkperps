@@ -149,10 +149,12 @@ export function PriceChart() {
           titleColor: "#94a3b8",
           bodyColor: "#fafafa",
           callbacks: {
-            label: (ctx: { dataset: { label?: string }; parsed: { y: number } }) =>
-              ctx.dataset.label === "Price"
+            label: (ctx: any) => {
+              if (ctx.parsed?.y == null) return "";
+              return ctx.dataset.label === "Price"
                 ? `$${ctx.parsed.y.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                : `Vol: ${ctx.parsed.y.toLocaleString()}`,
+                : `Vol: ${ctx.parsed.y.toLocaleString()}`;
+            },
           },
         },
       },

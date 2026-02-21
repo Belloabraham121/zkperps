@@ -55,7 +55,9 @@ export function Providers({ children }: { children: React.ReactNode }) {
           accentColor: "#676FFF",
         },
         embeddedWallets: {
-          createOnLogin: "all-users", // Create wallet immediately for all users on login
+          ethereum: {
+            createOnLogin: "all-users", // Create wallet immediately for all users on login
+          },
         },
       }}
     >
