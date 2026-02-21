@@ -17,10 +17,27 @@ import { createPrivateKey } from "crypto";
 import { getPrivyClient } from "./privy.js";
 import { config } from "../config.js";
 const caip2 = `eip155:${config.chainId}`;
-/** Normalize PEM: literal \n -> newline, collapse spaces/newlines into single newlines (valid PEM). */
+/**
+ * Normalize PEM from env: handle literal \n, spaces, or one-line paste.
+ * Rebuilds a valid PEM (64-char base64 lines) so OpenSSL decoder accepts it.
+ */
 function normalizePemString(raw) {
-    const withNewlines = raw.replace(/\\n/g, "\n").trim();
-    return withNewlines.replace(/\s+/g, "\n");
+    let s = raw.replace(/\\n/g, "\n").trim();
+    const beginMatch = s.match(/-----BEGIN[^-]+-----/);
+    const endMatch = s.match(/-----END[^-]+-----/);
+    if (!beginMatch || !endMatch) {
+        return s.replace(/\s+/g, "\n");
+    }
+    const header = beginMatch[0];
+    const footer = endMatch[0];
+    const start = s.indexOf(header) + header.length;
+    const end = s.indexOf(footer);
+    const body = s.slice(start, end).replace(/\s/g, "");
+    const lines = [];
+    for (let i = 0; i < body.length; i += 64) {
+        lines.push(body.slice(i, i + 64));
+    }
+    return `${header}\n${lines.join("\n")}\n${footer}`;
 }
 /**
  * Normalize PEM string from env (e.g. newlines stored as literal \n) and convert to
