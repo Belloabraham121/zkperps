@@ -36,18 +36,17 @@ export function MarketInfoBarBox() {
       ? formatChange(data.change24h, data.changePercent24h)
       : "—";
   const isPositive = data != null && data.changePercent24h >= 0;
-  const changeColor = data == null ? "text-[#7d8590]" : isPositive ? "text-[#4a9b6e]" : "text-[#b54a4a]";
+  const changeColor = data == null ? "text-white/50" : isPositive ? "text-[#4a9b6e]" : "text-[#b54a4a]";
 
   return (
-    <div className="flex h-12 shrink-0 items-center gap-4 border-b border-[#363d4a] bg-[#21262e] px-4">
-      {/* Trading pair + current price (CoinGecko) */}
+    <div className="flex h-12 shrink-0 items-center gap-4 border-b border-[#262626] bg-[#111111] px-4">
       <div className="flex items-center gap-2">
-        <div className="flex h-6 w-6 items-center justify-center rounded bg-[#3d4a5c]">
-          <span className="text-xs font-semibold text-[#8b9dc3]" aria-hidden>Ξ</span>
+        <div className="flex h-6 w-6 items-center justify-center bg-[#262626]">
+          <span className="text-xs font-semibold text-white/80" aria-hidden>Ξ</span>
         </div>
-        <span className="font-medium text-[#c8cdd4]">ETHUSD</span>
+        <span className="font-medium text-white">ETHUSD</span>
         {isLoading ? (
-          <span className="font-medium text-[#7d8590]">Loading…</span>
+          <span className="font-medium text-white/50">Loading…</span>
         ) : error ? (
           <span className="font-medium text-amber-400" title={error instanceof Error ? error.message : "Error"}>
             {priceStr}
@@ -57,7 +56,7 @@ export function MarketInfoBarBox() {
         )}
         <button
           type="button"
-          className="p-0.5 text-[#7d8590] hover:bg-[#363d4a] hover:text-[#c8cdd4]"
+          className="p-0.5 text-white/50 hover:bg-white/10 hover:text-white"
           aria-label="Market details"
         >
           <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -66,38 +65,34 @@ export function MarketInfoBarBox() {
         </button>
       </div>
 
-      <div className="h-5 w-px shrink-0 bg-[#363d4a]" aria-hidden />
+      <div className="h-5 w-px shrink-0 bg-[#262626]" aria-hidden />
 
-      {/* 24h Change (CoinGecko) */}
       <div className="flex flex-col">
-        <span className="text-[10px] uppercase tracking-wide text-[#7d8590]">24h Change</span>
+        <span className="text-[10px] uppercase tracking-wide text-white/50">24h Change</span>
         <span className={`text-sm font-medium ${changeColor}`}>{changeStr}</span>
       </div>
 
-      <div className="h-5 w-px shrink-0 bg-[#363d4a]" aria-hidden />
+      <div className="h-5 w-px shrink-0 bg-[#262626]" aria-hidden />
 
-      {/* Open Interest (placeholder – not from CoinGecko) */}
       <div className="flex flex-col">
-        <span className="text-[10px] uppercase tracking-wide text-[#7d8590]">Open Interest</span>
-        <span className="text-sm font-medium text-[#c8cdd4]">{PLACEHOLDER_OPEN_INTEREST}</span>
+        <span className="text-[10px] uppercase tracking-wide text-white/50">Open Interest</span>
+        <span className="text-sm font-medium text-white">{PLACEHOLDER_OPEN_INTEREST}</span>
       </div>
 
-      <div className="h-5 w-px shrink-0 bg-[#363d4a]" aria-hidden />
+      <div className="h-5 w-px shrink-0 bg-[#262626]" aria-hidden />
 
-      {/* Funding Rate (placeholder) */}
       <div className="flex flex-col">
-        <span className="text-[10px] uppercase tracking-wide text-[#7d8590]">Funding Rate</span>
+        <span className="text-[10px] uppercase tracking-wide text-white/50">Funding Rate</span>
         <span className="text-sm font-medium text-[#c8a855]">{PLACEHOLDER_FUNDING_RATE}</span>
       </div>
 
-      <div className="h-5 w-px shrink-0 bg-[#363d4a]" aria-hidden />
+      <div className="h-5 w-px shrink-0 bg-[#262626]" aria-hidden />
 
-      {/* Skew (placeholder) */}
       <div className="flex flex-col">
-        <span className="text-[10px] uppercase tracking-wide text-[#7d8590]">Skew</span>
+        <span className="text-[10px] uppercase tracking-wide text-white/50">Skew</span>
         <span className="text-sm font-medium">
           <span className="text-[#4a9b6e]">{PLACEHOLDER_SKEW_LONG}</span>
-          <span className="text-[#7d8590]">/</span>
+          <span className="text-white/50">/</span>
           <span className="text-[#b54a4a]">{PLACEHOLDER_SKEW_SHORT}</span>
         </span>
       </div>

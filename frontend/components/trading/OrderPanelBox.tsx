@@ -131,13 +131,12 @@ export function OrderPanelBox() {
   };
 
   return (
-    <aside className="flex w-80 shrink-0 flex-col border-b border-[#363d4a] bg-[#21262e] p-3">
+    <aside className="flex w-80 shrink-0 flex-col border-b border-[#262626] bg-[#111111] p-3">
       <form onSubmit={handleOpenPosition} className="flex flex-col gap-3">
-        {/* Leverage: 1x–10x */}
         <div>
           <div className="mb-1 flex items-center justify-between text-xs">
-            <span className="text-[#7d8590]">Leverage</span>
-            <span className="font-medium text-[#c8cdd4]">{leverage}x</span>
+            <span className="text-white/50">Leverage</span>
+            <span className="font-medium text-white">{leverage}x</span>
           </div>
           <input
             type="range"
@@ -145,16 +144,15 @@ export function OrderPanelBox() {
             max={LEVERAGE_MAX}
             value={leverage}
             onChange={(e) => setLeverage(Number(e.target.value))}
-            className="h-2 w-full accent-[#5b6b7a]"
+            className="h-2 w-full accent-white/50"
           />
         </div>
 
-        {/* Size: position size in base asset (e.g. ETH for ETH/USD) */}
         <div>
-          <label className="mb-1 block text-xs text-[#7d8590]">
+          <label className="mb-1 block text-xs text-white/50">
             Size (base asset)
           </label>
-          <p className="mb-1 text-[10px] text-[#7d8590]">
+          <p className="mb-1 text-[10px] text-white/50">
             How much you want to trade (e.g. 0.1 ETH for ETH/USD)
           </p>
           <input
@@ -164,18 +162,17 @@ export function OrderPanelBox() {
             placeholder="0.00"
             value={size}
             onChange={(e) => setSize(e.target.value)}
-            className={`w-full border bg-[#2a303c] px-2 py-1.5 text-sm text-[#c8cdd4] placeholder:text-[#7d8590] focus:outline-none focus:ring-1 focus:ring-[#5b6b7a] ${
-              errors.size ? "border-[#b54a4a]" : "border-[#363d4a]"
+            className={`w-full border bg-[#1a1a1a] px-2 py-1.5 text-sm text-white placeholder:text-white/50 focus:outline-none focus:ring-1 focus:ring-white/30 ${
+              errors.size ? "border-[#b54a4a]" : "border-[#262626]"
             }`}
             aria-label="Position size in base asset"
           />
           {errors.size && <p className="mt-0.5 text-xs text-[#b54a4a]">{errors.size}</p>}
         </div>
 
-        {/* Margin: collateral locked for this position. Contract: required margin = (size × price) / leverage */}
         <div>
-          <label className="mb-1 block text-xs text-[#7d8590]">Margin</label>
-          <p className="mb-1 text-[10px] text-[#7d8590]">
+          <label className="mb-1 block text-xs text-white/50">Margin</label>
+          <p className="mb-1 text-[10px] text-white/50">
             Collateral locked for this position (in USDC). Required ≈ (size × price) ÷ leverage
           </p>
           <input
@@ -185,8 +182,8 @@ export function OrderPanelBox() {
             placeholder="0.00"
             value={margin}
             onChange={(e) => setMargin(e.target.value)}
-            className={`w-full border bg-[#2a303c] px-2 py-1.5 text-sm text-[#c8cdd4] placeholder:text-[#7d8590] focus:outline-none focus:ring-1 focus:ring-[#5b6b7a] ${
-              errors.margin ? "border-[#b54a4a]" : "border-[#363d4a]"
+            className={`w-full border bg-[#1a1a1a] px-2 py-1.5 text-sm text-white placeholder:text-white/50 focus:outline-none focus:ring-1 focus:ring-white/30 ${
+              errors.margin ? "border-[#b54a4a]" : "border-[#262626]"
             }`}
             aria-label="Margin (collateral) in USDC"
           />
@@ -225,22 +222,22 @@ export function OrderPanelBox() {
           </div>
         )}
 
-        <div className="grid grid-cols-2 gap-1 text-xs text-[#7d8590]">
+        <div className="grid grid-cols-2 gap-1 text-xs text-white/50">
           <span>Value</span>
-          <span className="text-right font-medium text-[#c8cdd4]">
+          <span className="text-right font-medium text-white">
             {valueUSD != null
               ? `$${valueUSD.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
               : "—"}
           </span>
           <span>Est. Liq. Price</span>
-          <span className="text-right font-medium text-[#c8cdd4]">
+          <span className="text-right font-medium text-white">
             {estLiqPriceUSD != null
               ? `$${estLiqPriceUSD.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
               : "—"}
           </span>
         </div>
 
-        <div className="mt-3 border-t border-[#363d4a] pt-3">
+        <div className="mt-3 border-t border-[#262626] pt-3">
           <button
             type="button"
             disabled={clearing || !isAuthenticated || !token}
@@ -265,11 +262,11 @@ export function OrderPanelBox() {
                 setClearing(false);
               }
             }}
-            className="w-full rounded border border-[#363d4a] bg-[#2a303c] py-1.5 text-xs text-[#7d8590] hover:border-[#5b6b7a] hover:text-[#c8cdd4] disabled:cursor-not-allowed disabled:opacity-50"
+            className="w-full border border-[#262626] bg-[#1a1a1a] py-1.5 text-xs text-white/50 hover:border-white/20 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
           >
             {clearing ? "Clearing..." : "Clear pending batch"}
           </button>
-          <p className="mt-1 text-[10px] text-[#7d8590]">
+          <p className="mt-1 text-[10px] text-white/50">
             Use if batch keeps failing (e.g. old bad reveals). Then place 2 new orders.
           </p>
         </div>

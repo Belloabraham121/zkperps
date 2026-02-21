@@ -33,16 +33,15 @@ export function DepthChart() {
     });
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-hidden border-l border-[#363d4a] bg-[#21262e]">
-      {/* Tabs: Depth Chart | Trade Book - square, no curve */}
-      <div className="flex shrink-0 border-b border-[#363d4a]">
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden border-l border-[#262626] bg-[#111111]">
+      <div className="flex shrink-0 border-b border-[#262626]">
         <button
           type="button"
           onClick={() => setActiveTab("depth")}
           className={`flex-1 px-3 py-2 text-xs font-medium ${
             activeTab === "depth"
-              ? "border-b-2 border-[#5b6b7a] text-[#c8cdd4]"
-              : "text-[#7d8590] hover:text-[#c8cdd4]"
+              ? "border-b-2 border-white/30 text-white"
+              : "text-white/50 hover:text-white"
           }`}
         >
           Depth Chart
@@ -52,24 +51,23 @@ export function DepthChart() {
           onClick={() => setActiveTab("book")}
           className={`flex-1 px-3 py-2 text-xs font-medium ${
             activeTab === "book"
-              ? "border-b-2 border-[#5b6b7a] text-[#c8cdd4]"
-              : "text-[#7d8590] hover:text-[#c8cdd4]"
+              ? "border-b-2 border-white/30 text-white"
+              : "text-white/50 hover:text-white"
           }`}
         >
           Trade Book
         </button>
       </div>
 
-      {/* Column headers: FILL PRICE | VOLUME with +/- - square buttons, no border */}
-      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-[#363d4a] px-2 py-1.5 text-xs">
-        <div className="font-medium text-[#7d8590]">FILL PRICE</div>
+      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-[#262626] px-2 py-1.5 text-xs">
+        <div className="font-medium text-white/50">FILL PRICE</div>
         <div className="flex items-center gap-1">
-          <span className="font-medium text-[#7d8590]">VOLUME</span>
-          <div className="flex bg-[#2a303c]">
+          <span className="font-medium text-white/50">VOLUME</span>
+          <div className="flex bg-[#1a1a1a]">
             <button
               type="button"
               onClick={() => setVolumeScale((s) => Math.max(0.5, s - 0.25))}
-              className="px-1.5 py-0.5 text-[#c8cdd4] hover:bg-[#363d4a]"
+              className="px-1.5 py-0.5 text-white hover:bg-[#262626]"
               aria-label="Decrease volume scale"
             >
               −
@@ -77,7 +75,7 @@ export function DepthChart() {
             <button
               type="button"
               onClick={() => setVolumeScale((s) => Math.min(2, s + 0.25))}
-              className="px-1.5 py-0.5 text-[#c8cdd4] hover:bg-[#363d4a]"
+              className="px-1.5 py-0.5 text-white hover:bg-[#262626]"
               aria-label="Increase volume scale"
             >
               +
@@ -106,7 +104,7 @@ export function DepthChart() {
                     }}
                   />
                 </div>
-                <span className="w-16 shrink-0 text-right text-xs text-[#c8cdd4]">
+                <span className="w-16 shrink-0 text-right text-xs text-white">
                   {formatVolume(a.size)}
                 </span>
               </div>
@@ -139,7 +137,7 @@ export function DepthChart() {
                     }}
                   />
                 </div>
-                <span className="w-16 shrink-0 text-right text-xs text-[#c8cdd4]">
+                <span className="w-16 shrink-0 text-right text-xs text-white">
                   {formatVolume(b.size)}
                 </span>
               </div>

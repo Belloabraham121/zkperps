@@ -94,13 +94,13 @@ export function AccountSummaryBox() {
     });
 
   return (
-    <aside className="flex w-80 shrink-0 flex-col bg-[#21262e] p-3">
+    <aside className="flex w-80 shrink-0 flex-col bg-[#111111] p-3">
       <div className="mb-2 flex items-center justify-between">
-        <span className="text-xs font-medium text-[#7d8590]">{accountLabel}</span>
+        <span className="text-xs font-medium text-white/50">{accountLabel}</span>
         <button
           type="button"
           onClick={handleDepositClick}
-          className="bg-[#2a303c] px-2 py-1 text-xs font-medium text-[#c8cdd4] hover:bg-[#363d4a]"
+          className="bg-[#1a1a1a] px-2 py-1 text-xs font-medium text-white hover:bg-[#262626]"
         >
           Deposit collateral
         </button>
@@ -116,24 +116,24 @@ export function AccountSummaryBox() {
             onClick={() => !depositPending && setDepositModalOpen(false)}
           >
             <div
-              className="relative z-[101] w-full max-w-sm rounded-lg border border-[#363d4a] bg-[#21262e] p-4 shadow-xl"
+              className="relative z-[101] w-full max-w-sm rounded-lg border border-[#262626] bg-[#111111] p-4 shadow-xl"
               onClick={(e) => e.stopPropagation()}
             >
               <div className="mb-3 flex items-center justify-between">
-                <h3 className="text-sm font-medium text-[#c8cdd4]">
+                <h3 className="text-sm font-medium text-white">
                   Deposit USDC
                 </h3>
                 <button
                   type="button"
                   onClick={() => setDepositModalOpen(false)}
-                  className="text-[#7d8590] hover:text-[#c8cdd4] text-lg leading-none"
+                  className="text-white/50 hover:text-white text-lg leading-none"
                   disabled={depositPending}
                   aria-label="Close"
                 >
                   ×
                 </button>
               </div>
-              <p className="mb-3 text-xs text-[#7d8590]">
+              <p className="mb-3 text-xs text-white/50">
                 Amount to add to your perp account (collateral). You must have at least this much USDC in your wallet.
               </p>
               <form onSubmit={handleDepositSubmit} className="flex flex-col gap-3">
@@ -144,7 +144,7 @@ export function AccountSummaryBox() {
                   placeholder="0.00"
                   value={depositAmount}
                   onChange={(e) => setDepositAmount(e.target.value)}
-                  className="w-full border border-[#363d4a] bg-[#2a303c] px-3 py-2 text-sm text-[#c8cdd4] placeholder:text-[#7d8590] focus:outline-none focus:ring-2 focus:ring-[#5b6b7a]"
+                  className="w-full border border-[#262626] bg-[#1a1a1a] px-3 py-2 text-sm text-white placeholder:text-white/50 focus:outline-none focus:ring-2 focus:ring-white/30"
                   disabled={depositPending}
                   aria-label="Deposit amount in USDC"
                 />
@@ -152,7 +152,7 @@ export function AccountSummaryBox() {
                 <button
                   type="button"
                   onClick={() => setDepositModalOpen(false)}
-                  className="flex-1 py-2 text-sm font-medium text-[#7d8590] hover:bg-[#363d4a]"
+                  className="flex-1 py-2 text-sm font-medium text-white/50 hover:bg-[#262626]"
                   disabled={depositPending}
                 >
                   Cancel
@@ -160,7 +160,7 @@ export function AccountSummaryBox() {
                 <button
                   type="submit"
                   disabled={depositPending}
-                  className="flex-1 bg-[#3d4a5c] py-2 text-sm font-medium text-white hover:bg-[#4a5a6d] disabled:opacity-50"
+                  className="flex-1 bg-[#333333] py-2 text-sm font-medium text-white hover:bg-[#4a5a6d] disabled:opacity-50"
                 >
                   {depositPending ? "Depositing..." : "Deposit"}
                 </button>
@@ -173,42 +173,42 @@ export function AccountSummaryBox() {
 
       <div className="flex flex-col gap-2 text-xs">
         <div className="flex justify-between">
-          <span className="text-[#7d8590]">Available balance</span>
-          <span className="text-[#c8cdd4]">
+          <span className="text-white/50">Available balance</span>
+          <span className="text-white">
             {isLoading ? "..." : formatUsd(availableMargin)}
           </span>
         </div>
         <div className="flex justify-between">
-          <span className="text-[#7d8590]">Used margin</span>
-          <span className="text-[#c8cdd4]">
+          <span className="text-white/50">Used margin</span>
+          <span className="text-white">
             {isLoading ? "..." : formatUsd(usedMargin)}
           </span>
         </div>
       </div>
 
-      <div className="mt-3 border-t border-[#363d4a] pt-3">
-        <div className="mb-2 text-xs font-medium text-[#7d8590]">
+      <div className="mt-3 border-t border-[#262626] pt-3">
+        <div className="mb-2 text-xs font-medium text-white/50">
           Collateral
         </div>
-        <p className="mb-2 text-[10px] text-[#7d8590]">
+        <p className="mb-2 text-[10px] text-white/50">
           USDC deposited to trade. Available = free to use or withdraw; used = locked in positions.
         </p>
         <div className="flex flex-col gap-1.5 text-xs">
           <div className="flex justify-between">
-            <span className="text-[#7d8590]">Total deposited</span>
-            <span className="text-[#c8cdd4]">
+            <span className="text-white/50">Total deposited</span>
+            <span className="text-white">
               {isLoading ? "..." : formatUsd(totalCollateral)}
             </span>
           </div>
           <div className="flex justify-between">
-            <span className="text-[#7d8590]">Available</span>
-            <span className="text-[#c8cdd4]">
+            <span className="text-white/50">Available</span>
+            <span className="text-white">
               {isLoading ? "..." : formatUsd(availableMargin)}
             </span>
           </div>
           <div className="flex justify-between">
-            <span className="text-[#7d8590]">Used in positions</span>
-            <span className="text-[#c8cdd4]">
+            <span className="text-white/50">Used in positions</span>
+            <span className="text-white">
               {isLoading ? "..." : formatUsd(usedMargin)}
             </span>
           </div>
@@ -217,14 +217,14 @@ export function AccountSummaryBox() {
           <button
             type="button"
             onClick={handleDepositClick}
-            className="flex-1 bg-[#3d4a5c] py-1.5 text-xs font-medium text-white hover:bg-[#4a5a6d]"
+            className="flex-1 bg-[#333333] py-1.5 text-xs font-medium text-white hover:bg-[#4a5a6d]"
           >
             Deposit
           </button>
           <button
             type="button"
             onClick={handleWithdraw}
-            className="flex-1 bg-[#2a303c] py-1.5 text-xs font-medium text-[#c8cdd4] hover:bg-[#363d4a]"
+            className="flex-1 bg-[#1a1a1a] py-1.5 text-xs font-medium text-white hover:bg-[#262626]"
           >
             Withdraw
           </button>

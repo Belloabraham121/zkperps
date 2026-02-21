@@ -55,7 +55,7 @@ export function TradeLayout() {
   }, [isDragging]);
 
   return (
-    <div className="flex h-screen flex-col bg-[#1a1e26] text-[#c8cdd4]">
+    <div className="flex h-screen flex-col bg-[#0a0a0a] text-white">
       <NavbarBox />
       <MarketInfoBarBox />
       {/* Chart row: chart + order panel (leverage, size, margin) beside it */}
@@ -63,7 +63,7 @@ export function TradeLayout() {
         <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
           <ChartBox />
         </div>
-        <div className="flex w-80 shrink-0 flex-col overflow-y-auto border-l border-[#363d4a]">
+        <div className="flex w-80 shrink-0 flex-col overflow-y-auto border-l border-[#262626]">
           <OrderPanelBox />
           <AccountSummaryBox />
         </div>
@@ -73,14 +73,14 @@ export function TradeLayout() {
         role="separator"
         aria-label="Resize positions and open orders height"
         onMouseDown={handleMouseDown}
-        className={`flex h-3 shrink-0 cursor-ns-resize items-center justify-center border-y border-[#363d4a] bg-[#21262e] hover:bg-[#363d4a] active:bg-[#363d4a] select-none ${isDragging ? "bg-[#475569]" : ""}`}
+        className={`flex h-3 shrink-0 cursor-ns-resize items-center justify-center border-y border-[#262626] bg-[#111111] hover:bg-[#262626] active:bg-[#262626] select-none ${isDragging ? "bg-[#333333]" : ""}`}
       >
-        <span className="h-1 w-10 rounded-full bg-[#64748b]" />
+        <span className="h-1 w-10 rounded-full bg-white/30" />
       </div>
       {/* Positions + open orders section (resizable height by dragging the bar above) */}
       <div
         ref={bottomSectionRef}
-        className="flex min-h-0 shrink-0 overflow-hidden border-t border-[#363d4a]"
+        className="flex min-h-0 shrink-0 overflow-hidden border-t border-[#262626]"
         style={{ height: bottomSectionHeight }}
       >
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">

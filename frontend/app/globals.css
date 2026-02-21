@@ -1,14 +1,14 @@
 @import "tailwindcss";
 
-/* Dark blue-brown trading UI theme */
+/* Landing-aligned dark theme (#0a0a0a) */
 :root {
-  --ui-bg: #1a1e26;
-  --ui-surface: #21262e;
-  --ui-surface-elevated: #2a303c;
-  --ui-border: #363d4a;
-  --ui-text: #c8cdd4;
-  --ui-text-muted: #7d8590;
-  --ui-accent: #3d4a5c;
+  --ui-bg: #0a0a0a;
+  --ui-surface: #111111;
+  --ui-surface-elevated: #1a1a1a;
+  --ui-border: #262626;
+  --ui-text: #fafafa;
+  --ui-text-muted: #a3a3a3;
+  --ui-accent: #333333;
   --ui-long: #2d5a4a;
   --ui-short: #5a3d3d;
 }

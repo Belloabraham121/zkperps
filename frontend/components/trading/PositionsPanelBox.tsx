@@ -44,8 +44,8 @@ function OrdersTable({
   return (
     <div className="min-h-0 flex-1 overflow-auto overflow-x-auto">
       <table className="w-full min-w-[600px] border-collapse text-xs">
-        <thead className="sticky top-0 z-10 bg-[#21262e]">
-          <tr className="border-b border-[#363d4a] text-[#7d8590]">
+        <thead className="sticky top-0 z-10 bg-[#111111]">
+          <tr className="border-b border-[#262626] text-white/50">
             <th className="py-2 pl-2 text-left font-medium uppercase tracking-wide">Time</th>
             <th className="py-2 text-left font-medium uppercase tracking-wide">Symbol</th>
             <th className="py-2 text-right font-medium uppercase tracking-wide">Side</th>
@@ -58,29 +58,29 @@ function OrdersTable({
         <tbody>
           {isLoading ? (
             <tr>
-              <td colSpan={showStatus ? 7 : 6} className="py-8 text-center text-[#7d8590]">
+              <td colSpan={showStatus ? 7 : 6} className="py-8 text-center text-white/50">
                 Loading...
               </td>
             </tr>
           ) : orders.length === 0 ? (
             <tr>
-              <td colSpan={showStatus ? 7 : 6} className="py-8 text-center text-[#7d8590]">
+              <td colSpan={showStatus ? 7 : 6} className="py-8 text-center text-white/50">
                 No orders
               </td>
             </tr>
           ) : (
             orders.map((o) => (
-              <tr key={o.commitmentHash} className="border-b border-[#363d4a] hover:bg-[#2a303c]">
-                <td className="py-2 pl-2 text-[#c8cdd4]">{formatOrderDate(o.createdAt)}</td>
-                <td className="py-2 text-[#c8cdd4]">ETHUSD</td>
+              <tr key={o.commitmentHash} className="border-b border-[#262626] hover:bg-[#1a1a1a]">
+                <td className="py-2 pl-2 text-white">{formatOrderDate(o.createdAt)}</td>
+                <td className="py-2 text-white">ETHUSD</td>
                 <td className="py-2 text-right">
                   <span className={o.isLong ? "text-[#4a9b6e]" : "text-[#c75a5a]"}>
                     {o.isLong ? "Long" : "Short"} {o.isOpen ? "Open" : "Close"}
                   </span>
                 </td>
-                <td className="py-2 text-right text-[#c8cdd4]">{formatPositionSize(o.size)}</td>
-                <td className="py-2 text-right text-[#c8cdd4]">{leverageFromBigInt(o.leverage)}x</td>
-                <td className="py-2 text-right text-[#c8cdd4]">
+                <td className="py-2 text-right text-white">{formatPositionSize(o.size)}</td>
+                <td className="py-2 text-right text-white">{leverageFromBigInt(o.leverage)}x</td>
+                <td className="py-2 text-right text-white">
                   ${amountFromBigInt(o.collateral, 18).toLocaleString(undefined, { minimumFractionDigits: 2 })}
                 </td>
                 {showStatus && (
@@ -91,7 +91,7 @@ function OrdersTable({
                           ? "text-amber-400"
                           : o.status === "executed"
                             ? "text-[#4a9b6e]"
-                            : "text-[#7d8590]"
+                            : "text-white/50"
                       }
                     >
                       {o.status}
@@ -111,8 +111,8 @@ function TradesTable({ trades, isLoading }: { trades: PerpTradeRecord[]; isLoadi
   return (
     <div className="min-h-0 flex-1 overflow-auto overflow-x-auto">
       <table className="w-full min-w-[600px] border-collapse text-xs">
-        <thead className="sticky top-0 z-10 bg-[#21262e]">
-          <tr className="border-b border-[#363d4a] text-[#7d8590]">
+        <thead className="sticky top-0 z-10 bg-[#111111]">
+          <tr className="border-b border-[#262626] text-white/50">
             <th className="py-2 pl-2 text-left font-medium uppercase tracking-wide">Time</th>
             <th className="py-2 text-left font-medium uppercase tracking-wide">Symbol</th>
             <th className="py-2 text-right font-medium uppercase tracking-wide">Side</th>
@@ -124,28 +124,28 @@ function TradesTable({ trades, isLoading }: { trades: PerpTradeRecord[]; isLoadi
         <tbody>
           {isLoading ? (
             <tr>
-              <td colSpan={6} className="py-8 text-center text-[#7d8590]">
+              <td colSpan={6} className="py-8 text-center text-white/50">
                 Loading...
               </td>
             </tr>
           ) : trades.length === 0 ? (
             <tr>
-              <td colSpan={6} className="py-8 text-center text-[#7d8590]">
+              <td colSpan={6} className="py-8 text-center text-white/50">
                 No trades
               </td>
             </tr>
           ) : (
             trades.map((t) => (
-              <tr key={t.commitmentHash + t.executedAt} className="border-b border-[#363d4a] hover:bg-[#2a303c]">
-                <td className="py-2 pl-2 text-[#c8cdd4]">{formatOrderDate(t.executedAt)}</td>
-                <td className="py-2 text-[#c8cdd4]">ETHUSD</td>
+              <tr key={t.commitmentHash + t.executedAt} className="border-b border-[#262626] hover:bg-[#1a1a1a]">
+                <td className="py-2 pl-2 text-white">{formatOrderDate(t.executedAt)}</td>
+                <td className="py-2 text-white">ETHUSD</td>
                 <td className="py-2 text-right">
                   <span className={t.isLong ? "text-[#4a9b6e]" : "text-[#c75a5a]"}>
                     {t.isLong ? "Long" : "Short"} {t.isOpen ? "Open" : "Close"}
                   </span>
                 </td>
-                <td className="py-2 text-right text-[#c8cdd4]">{formatPositionSize(t.size)}</td>
-                <td className="py-2 text-right text-[#c8cdd4]">
+                <td className="py-2 text-right text-white">{formatPositionSize(t.size)}</td>
+                <td className="py-2 text-right text-white">
                   {t.entryPrice
                     ? `$${priceFromBigInt(t.entryPrice).toLocaleString(undefined, { minimumFractionDigits: 2 })}`
                     : "—"}
@@ -155,7 +155,7 @@ function TradesTable({ trades, isLoading }: { trades: PerpTradeRecord[]; isLoadi
                     href={`https://sepolia.arbiscan.io/tx/${t.txHash}`}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-[#5b6b7a] hover:text-[#c8cdd4] truncate max-w-[80px] inline-block"
+                    className="text-white/40 hover:text-white truncate max-w-[80px] inline-block"
                     title={t.txHash}
                   >
                     {t.txHash.slice(0, 10)}…
@@ -291,9 +291,9 @@ export function PositionsPanelBox() {
   };
 
   return (
-    <section className="flex min-h-0 flex-1 flex-col overflow-hidden border-t border-[#363d4a] bg-[#21262e]">
+    <section className="flex min-h-0 flex-1 flex-col overflow-hidden border-t border-[#262626] bg-[#111111]">
       {/* Tabs + All Markets filter - square tabs, no curve */}
-      <div className="flex shrink-0 items-center justify-between border-b border-[#363d4a] px-2 py-1.5">
+      <div className="flex shrink-0 items-center justify-between border-b border-[#262626] px-2 py-1.5">
         <div className="flex items-center gap-1 overflow-x-auto">
           {TABS.map((tab) => (
             <button
@@ -302,15 +302,15 @@ export function PositionsPanelBox() {
               onClick={() => setActiveTab(tab.id)}
               className={`flex items-center gap-1.5 whitespace-nowrap px-2 py-1.5 text-xs font-medium ${
                 activeTab === tab.id
-                  ? "border-b-2 border-[#5b6b7a] text-[#c8cdd4]"
-                  : "text-[#7d8590] hover:text-[#c8cdd4]"
+                  ? "border-b-2 border-white/30 text-white"
+                  : "text-white/50 hover:text-white"
               }`}
             >
               {tab.label}
               {tab.id === "positions" && (
                 <span
                   className={`border px-1.5 py-0.5 text-[10px] ${
-                    activeTab === tab.id ? "border-[#363d4a] bg-[#2a303c] text-[#c8cdd4]" : "border-[#363d4a] text-[#7d8590]"
+                    activeTab === tab.id ? "border-[#262626] bg-[#1a1a1a] text-white" : "border-[#262626] text-white/50"
                   }`}
                 >
                   {positions.length}
@@ -319,7 +319,7 @@ export function PositionsPanelBox() {
               {tab.id === "open-orders" && (
                 <span
                   className={`border px-1.5 py-0.5 text-[10px] ${
-                    activeTab === tab.id ? "border-[#363d4a] bg-[#2a303c] text-[#c8cdd4]" : "border-[#363d4a] text-[#7d8590]"
+                    activeTab === tab.id ? "border-[#262626] bg-[#1a1a1a] text-white" : "border-[#262626] text-white/50"
                   }`}
                 >
                   {openOrders.length}
@@ -328,12 +328,12 @@ export function PositionsPanelBox() {
             </button>
           ))}
         </div>
-        <label className="flex shrink-0 cursor-pointer items-center gap-1.5 text-xs text-[#7d8590]">
+        <label className="flex shrink-0 cursor-pointer items-center gap-1.5 text-xs text-white/50">
           <input
             type="checkbox"
             checked={allMarkets}
             onChange={(e) => setAllMarkets(e.target.checked)}
-            className="h-3.5 w-3.5 border-[#363d4a] bg-[#2a303c] accent-[#4a9b6e]"
+            className="h-3.5 w-3.5 border-[#262626] bg-[#1a1a1a] accent-[#4a9b6e]"
           />
           All Markets
         </label>
@@ -343,8 +343,8 @@ export function PositionsPanelBox() {
       {activeTab === "positions" && (
         <div className="min-h-0 flex-1 overflow-auto overflow-x-auto">
           <table className="w-full min-w-[800px] border-collapse text-xs">
-            <thead className="sticky top-0 z-10 bg-[#21262e]">
-              <tr className="border-b border-[#363d4a] text-[#7d8590]">
+            <thead className="sticky top-0 z-10 bg-[#111111]">
+              <tr className="border-b border-[#262626] text-white/50">
                 <th className="py-2 pl-2 text-left font-medium uppercase tracking-wide">Symbol</th>
                 <th className="py-2 text-right font-medium uppercase tracking-wide">Quantity</th>
                 <th className="py-2 text-right font-medium uppercase tracking-wide">Entry Price</th>
@@ -359,7 +359,7 @@ export function PositionsPanelBox() {
                     type="button"
                     onClick={handleCloseAll}
                     disabled={closePosition.isPending || positions.length === 0}
-                    className="bg-[#2a303c] px-2 py-1 text-[#c8cdd4] hover:bg-[#363d4a] disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="bg-[#1a1a1a] px-2 py-1 text-white hover:bg-[#262626] disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {closePosition.isPending ? "Closing..." : "Close All"}
                   </button>
@@ -369,21 +369,21 @@ export function PositionsPanelBox() {
             <tbody>
               {isLoading ? (
                 <tr>
-                  <td colSpan={10} className="py-8 text-center text-[#7d8590]">
+                  <td colSpan={10} className="py-8 text-center text-white/50">
                     Loading positions...
                   </td>
                 </tr>
               ) : positions.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="py-8 text-center text-[#7d8590]">
+                  <td colSpan={10} className="py-8 text-center text-white/50">
                     No open positions
                   </td>
                 </tr>
               ) : (
                 positions.map((row, i) => (
-                <tr key={i} className="border-b border-[#363d4a] hover:bg-[#2a303c]">
+                <tr key={i} className="border-b border-[#262626] hover:bg-[#1a1a1a]">
                   <td className="py-2 pl-2">
-                    <div className="font-medium text-[#c8cdd4]">{row.symbol}</div>
+                    <div className="font-medium text-white">{row.symbol}</div>
                     <span
                       className={`mt-0.5 inline-block px-1.5 py-0.5 text-[10px] font-medium text-white ${
                         row.marginMode === "isolated" ? "bg-[#5a3d3d]" : "bg-[#2d5a4a]"
@@ -392,15 +392,15 @@ export function PositionsPanelBox() {
                       {row.leverage}x {row.marginMode === "isolated" ? "Isolated" : "Cross"}
                     </span>
                   </td>
-                  <td className="py-2 text-right text-[#c8cdd4]">
+                  <td className="py-2 text-right text-white">
                     {row.quantity} {row.quantityLabel}
                   </td>
-                  <td className="py-2 text-right text-[#c8cdd4]">{row.entryPrice}</td>
-                  <td className="py-2 text-right text-[#c8cdd4]">{row.markPrice}</td>
-                  <td className="py-2 text-right text-[#c8cdd4]">{row.liqPrice}</td>
-                  <td className="py-2 text-right text-[#c8cdd4]">
+                  <td className="py-2 text-right text-white">{row.entryPrice}</td>
+                  <td className="py-2 text-right text-white">{row.markPrice}</td>
+                  <td className="py-2 text-right text-white">{row.liqPrice}</td>
+                  <td className="py-2 text-right text-white">
                     {row.margin}
-                    <button type="button" className="ml-1 inline-block text-[#7d8590] hover:text-[#c8cdd4]" aria-label="Edit margin">
+                    <button type="button" className="ml-1 inline-block text-white/50 hover:text-white" aria-label="Edit margin">
                       <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
                       </svg>
@@ -417,14 +417,14 @@ export function PositionsPanelBox() {
                   <td className="py-2">
                     <div className="flex justify-center">
                       {row.hasTpSl ? (
-                        <div className="text-center text-[#c8cdd4]">
+                        <div className="text-center text-white">
                           <div>{row.tpSlLabel}</div>
                           <div>{row.tpSlValue}</div>
                         </div>
                       ) : (
                         <button
                           type="button"
-                          className="flex h-6 w-6 items-center justify-center bg-[#2a303c] text-[#7d8590] hover:bg-[#363d4a] hover:text-[#c8cdd4]"
+                          className="flex h-6 w-6 items-center justify-center bg-[#1a1a1a] text-white/50 hover:bg-[#262626] hover:text-white"
                           aria-label="Add TP/SL"
                         >
                           +
@@ -437,7 +437,7 @@ export function PositionsPanelBox() {
                       type="button"
                       onClick={() => handleClose(i)}
                       disabled={closePosition.isPending}
-                      className="bg-[#2a303c] px-2 py-1 text-[#c8cdd4] hover:bg-[#363d4a] disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="bg-[#1a1a1a] px-2 py-1 text-white hover:bg-[#262626] disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       {closePosition.isPending ? "Closing..." : "Close"}
                     </button>
@@ -472,7 +472,7 @@ export function PositionsPanelBox() {
 
       {/* Historical P&L placeholder */}
       {activeTab === "historical-pnl" && (
-        <div className="flex flex-1 items-center justify-center p-4 text-xs text-[#7d8590]">
+        <div className="flex flex-1 items-center justify-center p-4 text-xs text-white/50">
           Historical P&L will appear here.
         </div>
       )}

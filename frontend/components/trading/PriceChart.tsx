@@ -147,7 +147,7 @@ export function PriceChart() {
         tooltip: {
           backgroundColor: "#1e293b",
           titleColor: "#94a3b8",
-          bodyColor: "#c8cdd4",
+          bodyColor: "#fafafa",
           callbacks: {
             label: (ctx: { dataset: { label?: string }; parsed: { y: number } }) =>
               ctx.dataset.label === "Price"
@@ -187,11 +187,11 @@ export function PriceChart() {
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
       {/* Top controls */}
-      <div className="flex items-center justify-between gap-2 border-b border-[#363d4a] py-1.5">
+      <div className="flex items-center justify-between gap-2 border-b border-[#262626] py-1.5">
         <div className="flex items-center gap-1">
           <button
             type="button"
-            className="p-1.5 text-[#7d8590] hover:bg-[#363d4a] hover:text-[#c8cdd4]"
+            className="p-1.5 text-white/50 hover:bg-white/10 hover:text-white"
             title="Drawing tools"
             aria-label="Drawing tools"
           >
@@ -201,7 +201,7 @@ export function PriceChart() {
           </button>
           <button
             type="button"
-            className="p-1.5 text-[#7d8590] hover:bg-[#363d4a] hover:text-[#c8cdd4]"
+            className="p-1.5 text-white/50 hover:bg-white/10 hover:text-white"
             title="Layout"
             aria-label="Layout"
           >
@@ -209,13 +209,13 @@ export function PriceChart() {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6z" />
             </svg>
           </button>
-          <div className="ml-1 flex bg-[#2a303c] p-0.5">
+          <div className="ml-1 flex bg-[#1a1a1a] p-0.5">
             {TIMEFRAMES.map((tf) => (
               <button
                 key={tf}
                 type="button"
                 onClick={() => setTimeframe(tf)}
-                className={`px-2 py-1 text-xs font-medium ${timeframe === tf ? "bg-[#3d4a5c] text-white" : "text-[#7d8590] hover:text-[#c8cdd4]"}`}
+                className={`px-2 py-1 text-xs font-medium ${timeframe === tf ? "bg-[#333333] text-white" : "text-white/50 hover:text-white"}`}
               >
                 {tf}
               </button>
@@ -228,7 +228,7 @@ export function PriceChart() {
               <button
                 key={t}
                 type="button"
-                className="p-1.5 text-[#7d8590] hover:bg-[#363d4a] hover:text-[#c8cdd4]"
+                className="p-1.5 text-white/50 hover:bg-white/10 hover:text-white"
                 title={t}
                 aria-label={t}
               >
@@ -242,16 +242,16 @@ export function PriceChart() {
       </div>
 
       {/* Data bar */}
-      <div className="flex flex-wrap items-center gap-4 border-b border-[#363d4a] px-2 py-1.5 text-xs text-[#7d8590]">
+      <div className="flex flex-wrap items-center gap-4 border-b border-[#262626] px-2 py-1.5 text-xs text-white/50">
         {loading && <span className="text-amber-400">Loading…</span>}
         {error && <span className="text-red-400" title={error}>Error (showing mock)</span>}
         {!loading && hasCoingeckoApiKey() && !error && <span className="text-emerald-500/90">ETH/USD · CoinGecko</span>}
-        <span><strong className="text-[#c8cdd4]">Open:</strong> {formatPrice(chartData.summary.open)}</span>
-        <span><strong className="text-[#c8cdd4]">High:</strong> {formatPrice(chartData.summary.high)}</span>
-        <span><strong className="text-[#c8cdd4]">Low:</strong> {formatPrice(chartData.summary.low)}</span>
-        <span><strong className="text-[#c8cdd4]">Close:</strong> {formatPrice(chartData.summary.close)}</span>
-        <span><strong className="text-[#c8cdd4]">Volume:</strong> {chartData.summary.volumePct}%</span>
-        <span><strong className="text-[#c8cdd4]">Amplitude:</strong> {chartData.summary.amplitudePct.toFixed(2)}%</span>
+        <span><strong className="text-white">Open:</strong> {formatPrice(chartData.summary.open)}</span>
+        <span><strong className="text-white">High:</strong> {formatPrice(chartData.summary.high)}</span>
+        <span><strong className="text-white">Low:</strong> {formatPrice(chartData.summary.low)}</span>
+        <span><strong className="text-white">Close:</strong> {formatPrice(chartData.summary.close)}</span>
+        <span><strong className="text-white">Volume:</strong> {chartData.summary.volumePct}%</span>
+        <span><strong className="text-white">Amplitude:</strong> {chartData.summary.amplitudePct.toFixed(2)}%</span>
       </div>
 
       {/* Chart - Chart.js */}
@@ -260,13 +260,13 @@ export function PriceChart() {
       </div>
 
       {/* Bottom bar */}
-      <div className="flex items-center justify-between border-t border-[#363d4a] px-2 py-1 text-xs text-[#7d8590]">
+      <div className="flex items-center justify-between border-t border-[#262626] px-2 py-1 text-xs text-white/50">
         <span>{utcTime}</span>
         <div className="flex items-center gap-2">
-          <button type="button" className="hover:text-[#c8cdd4]">%</button>
-          <button type="button" className="hover:text-[#c8cdd4]">Log</button>
-          <button type="button" className="text-[#5b6b7a]">auto</button>
-          <button type="button" className="p-0.5 hover:bg-[#363d4a]" aria-label="Settings">
+          <button type="button" className="hover:text-white">%</button>
+          <button type="button" className="hover:text-white">Log</button>
+          <button type="button" className="text-white/40">auto</button>
+          <button type="button" className="p-0.5 hover:bg-white/10" aria-label="Settings">
             <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
