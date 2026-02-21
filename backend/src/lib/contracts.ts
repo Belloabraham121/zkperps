@@ -2,7 +2,7 @@
  * Contract addresses and encoding helpers for Arbitrum Sepolia perps.
  * Matches scripts/zk/test-perp-e2e.js and PERPS_IMPLEMENTATION_PLAN.md.
  */
-import { encodeFunctionData } from "viem";
+import { encodeFunctionData, encodeAbiParameters, keccak256, type Address } from "viem";
 import { config } from "../config.js";
 
 const { contracts: c } = config;
@@ -34,6 +34,107 @@ const PERP_MANAGER_ABI = [
   },
 ] as const;
 
+const HOOK_ABI = [
+  {
+    name: "submitPerpCommitment",
+    type: "function",
+    stateMutability: "nonpayable",
+    inputs: [
+      {
+        name: "key",
+        type: "tuple",
+        components: [
+          { name: "currency0", type: "address" },
+          { name: "currency1", type: "address" },
+          { name: "fee", type: "uint24" },
+          { name: "tickSpacing", type: "int24" },
+          { name: "hooks", type: "address" },
+        ],
+      },
+      { name: "commitmentHash", type: "bytes32" },
+    ],
+    outputs: [],
+  },
+  {
+    name: "submitPerpReveal",
+    type: "function",
+    stateMutability: "nonpayable",
+    inputs: [
+      {
+        name: "key",
+        type: "tuple",
+        components: [
+          { name: "currency0", type: "address" },
+          { name: "currency1", type: "address" },
+          { name: "fee", type: "uint24" },
+          { name: "tickSpacing", type: "int24" },
+          { name: "hooks", type: "address" },
+        ],
+      },
+      {
+        name: "intent",
+        type: "tuple",
+        components: [
+          { name: "user", type: "address" },
+          { name: "market", type: "address" },
+          { name: "size", type: "uint256" },
+          { name: "isLong", type: "bool" },
+          { name: "isOpen", type: "bool" },
+          { name: "collateral", type: "uint256" },
+          { name: "leverage", type: "uint256" },
+          { name: "nonce", type: "uint256" },
+          { name: "deadline", type: "uint256" },
+        ],
+      },
+    ],
+    outputs: [],
+  },
+  {
+    name: "revealAndBatchExecutePerps",
+    type: "function",
+    stateMutability: "nonpayable",
+    inputs: [
+      {
+        name: "key",
+        type: "tuple",
+        components: [
+          { name: "currency0", type: "address" },
+          { name: "currency1", type: "address" },
+          { name: "fee", type: "uint24" },
+          { name: "tickSpacing", type: "int24" },
+          { name: "hooks", type: "address" },
+        ],
+      },
+      { name: "commitmentHashes", type: "bytes32[]" },
+      { name: "baseIsCurrency0", type: "bool" },
+    ],
+    outputs: [],
+  },
+  {
+    name: "computePerpCommitmentHash",
+    type: "function",
+    stateMutability: "view",
+    inputs: [
+      {
+        name: "intent",
+        type: "tuple",
+        components: [
+          { name: "user", type: "address" },
+          { name: "market", type: "address" },
+          { name: "size", type: "uint256" },
+          { name: "isLong", type: "bool" },
+          { name: "isOpen", type: "bool" },
+          { name: "collateral", type: "uint256" },
+          { name: "leverage", type: "uint256" },
+          { name: "nonce", type: "uint256" },
+          { name: "deadline", type: "uint256" },
+        ],
+      },
+    ],
+    outputs: [{ name: "", type: "bytes32" }],
+  },
+] as const;
+
 export const contractAddresses = {
   privBatchHook: c.privBatchHook,
   perpPositionManager: c.perpPositionManager,
@@ -45,7 +146,10 @@ export const contractAddresses = {
 /**
  * Encode USDC approve(spender, amount) for use in sendTransaction.
  */
-export function encodeUsdcApprove(spender: `0x${string}`, amount: bigint): `0x${string}` {
+export function encodeUsdcApprove(
+  spender: `0x${string}`,
+  amount: bigint,
+): `0x${string}` {
   return encodeFunctionData({
     abi: ERC20_ABI,
     functionName: "approve",
@@ -56,7 +160,10 @@ export function encodeUsdcApprove(spender: `0x${string}`, amount: bigint): `0x${
 /**
  * Encode PerpPositionManager.depositCollateral(user, amount).
  */
-export function encodeDepositCollateral(user: `0x${string}`, amount: bigint): `0x${string}` {
+export function encodeDepositCollateral(
+  user: `0x${string}`,
+  amount: bigint,
+): `0x${string}` {
   return encodeFunctionData({
     abi: PERP_MANAGER_ABI,
     functionName: "depositCollateral",
@@ -68,7 +175,10 @@ export function encodeDepositCollateral(user: `0x${string}`, amount: bigint): `0
  * Two-step deposit: 1) approve USDC to PerpPositionManager, 2) depositCollateral(user, amount).
  * Frontend can call POST /api/trade/send twice (approve then deposit) or we add a single deposit route that sends both.
  */
-export function getDepositCollateralCalldata(user: `0x${string}`, amount: bigint): {
+export function getDepositCollateralCalldata(
+  user: `0x${string}`,
+  amount: bigint,
+): {
   approveData: `0x${string}`;
   depositData: `0x${string}`;
 } {
@@ -76,4 +186,133 @@ export function getDepositCollateralCalldata(user: `0x${string}`, amount: bigint
     approveData: encodeUsdcApprove(c.perpPositionManager, amount),
     depositData: encodeDepositCollateral(user, amount),
   };
+}
+
+/**
+ * Pool key structure for Uniswap V4 pools
+ */
+export interface PoolKey {
+  currency0: Address;
+  currency1: Address;
+  fee: number;
+  tickSpacing: number;
+  hooks: Address;
+}
+
+/**
+ * PerpIntent structure matching the contract
+ */
+export interface PerpIntent {
+  user: Address;
+  market: Address;
+  size: bigint;
+  isLong: boolean;
+  isOpen: boolean;
+  collateral: bigint;
+  leverage: bigint;
+  nonce: bigint;
+  deadline: bigint;
+}
+
+/**
+ * Compute PoolId from pool key (keccak256(abi.encode(poolKey))).
+ * Matches Uniswap V4 PoolKey.toId().
+ */
+export function computePoolId(poolKey: PoolKey): `0x${string}` {
+  const encoded = encodeAbiParameters(
+    [
+      {
+        type: "tuple",
+        components: [
+          { name: "currency0", type: "address" },
+          { name: "currency1", type: "address" },
+          { name: "fee", type: "uint24" },
+          { name: "tickSpacing", type: "int24" },
+          { name: "hooks", type: "address" },
+        ],
+      },
+    ],
+    [poolKey]
+  );
+  return keccak256(encoded);
+}
+
+/**
+ * Build pool key from currency addresses.
+ * Ensures currency0 < currency1 (Uniswap V4 requirement).
+ */
+export function buildPoolKey(
+  currency0: Address,
+  currency1: Address,
+  hookAddress: Address,
+): PoolKey {
+  // Ensure currency0 < currency1
+  const sorted = currency0.toLowerCase() < currency1.toLowerCase()
+    ? { currency0, currency1 }
+    : { currency0: currency1, currency1: currency0 };
+  
+  return {
+    currency0: sorted.currency0 as Address,
+    currency1: sorted.currency1 as Address,
+    fee: 3000, // 0.3% fee
+    tickSpacing: 60,
+    hooks: hookAddress,
+  };
+}
+
+/**
+ * Encode submitPerpCommitment(poolKey, commitmentHash) for use in sendTransaction.
+ */
+export function encodeSubmitPerpCommitment(
+  poolKey: PoolKey,
+  commitmentHash: `0x${string}`,
+): `0x${string}` {
+  return encodeFunctionData({
+    abi: HOOK_ABI,
+    functionName: "submitPerpCommitment",
+    args: [poolKey, commitmentHash],
+  });
+}
+
+/**
+ * Encode submitPerpReveal(poolKey, intent) for use in sendTransaction.
+ */
+export function encodeSubmitPerpReveal(
+  poolKey: PoolKey,
+  intent: PerpIntent,
+): `0x${string}` {
+  return encodeFunctionData({
+    abi: HOOK_ABI,
+    functionName: "submitPerpReveal",
+    args: [poolKey, intent],
+  });
+}
+
+/**
+ * Encode revealAndBatchExecutePerps(poolKey, commitmentHashes, baseIsCurrency0) for use in sendTransaction.
+ */
+export function encodeRevealAndBatchExecutePerps(
+  poolKey: PoolKey,
+  commitmentHashes: `0x${string}`[],
+  baseIsCurrency0: boolean,
+): `0x${string}` {
+  return encodeFunctionData({
+    abi: HOOK_ABI,
+    functionName: "revealAndBatchExecutePerps",
+    args: [poolKey, commitmentHashes, baseIsCurrency0],
+  });
+}
+
+/**
+ * Encode computePerpCommitmentHash(intent) for use in eth_call (read-only).
+ * Note: This is a view function, so it's typically called via RPC, not in a transaction.
+ */
+export function encodeComputePerpCommitmentHash(
+  intent: PerpIntent,
+): `0x${string}` {
+  return encodeFunctionData({
+    abi: HOOK_ABI,
+    functionName: "computePerpCommitmentHash",
+    args: [intent],
+  });
 }

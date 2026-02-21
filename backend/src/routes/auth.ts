@@ -14,7 +14,19 @@ export const authRouter = Router();
 /** Shared handler: verify Privy access token, return JWT + wallet/signerId or link instructions */
 async function handleVerifyToken(accessToken: string, res: Response, endpoint: string): Promise<void> {
   try {
+    if (!accessToken || typeof accessToken !== "string" || accessToken.trim() === "") {
+      console.error(`[${endpoint}] Invalid access token provided:`, { 
+        hasToken: !!accessToken, 
+        type: typeof accessToken,
+        length: accessToken?.length 
+      });
+      res.status(400).json({ error: "Invalid access token" });
+      return;
+    }
+
+    console.log(`[${endpoint}] Verifying access token (length: ${accessToken.length})`);
     const info = await verifyAccessToken(accessToken);
+    console.log(`[${endpoint}] Token verified successfully:`, { userId: info.userId, hasWallet: !!info.walletAddress });
     const signerId = getSignerIdForFrontend();
     
     if (info.walletAddress) {
@@ -41,7 +53,17 @@ async function handleVerifyToken(accessToken: string, res: Response, endpoint: s
         "Call POST /api/auth/link with walletAddress and walletId (and same accessToken) after frontend has embedded wallet",
     });
   } catch (error) {
-    console.error(`[Auth:${endpoint}] ❌ Error:`, error instanceof Error ? error.message : String(error));
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    // Check if it's an SSL/TLS error
+    const isSSLError = errorMessage.includes("SSL") || 
+                      errorMessage.includes("TLS") || 
+                      errorMessage.includes("tlsv1") ||
+                      errorMessage.includes("ECONNRESET") ||
+                      errorMessage.includes("ETIMEDOUT");
+    
+    if (isSSLError) {
+      throw new Error("Network connection error. Please try again.");
+    }
     throw error;
   }
 }
@@ -62,6 +84,7 @@ authRouter.post("/signup", async (req: AuthRequest, res: Response): Promise<void
     await handleVerifyToken(accessToken, res, "signup");
   } catch (e) {
     const message = e instanceof Error ? e.message : "Signup failed";
+    console.error("[signup] Error:", e);
     res.status(401).json({ error: message });
   }
 });
@@ -81,6 +104,7 @@ authRouter.post("/login", async (req: AuthRequest, res: Response): Promise<void>
     await handleVerifyToken(accessToken, res, "login");
   } catch (e) {
     const message = e instanceof Error ? e.message : "Login failed";
+    console.error("[login] Error:", e);
     res.status(401).json({ error: message });
   }
 });

@@ -52,6 +52,7 @@ export function useAuth() {
   const lastUserId = useRef<string | null>(null); // Track user changes
   const cachedAccessToken = useRef<string | null>(null); // Cache access token to avoid repeated calls
   const tokenCacheTime = useRef<number>(0); // When token was cached
+  const lastLinkedWalletId = useRef<string | null>(null); // Wallet ID we last sent to backend (so we can re-link when id appears)
   const TOKEN_CACHE_TTL = 5 * 60 * 1000; // Cache for 5 minutes
 
   // Get embedded wallet - use stable references
@@ -73,10 +74,24 @@ export function useAuth() {
     return undefined;
   }, [wallets]);
   const walletAddress = embeddedWallet?.address;
-  // walletId may not exist on all wallet types
-  const walletId = embeddedWallet && 'id' in embeddedWallet && embeddedWallet.id !== undefined
-    ? String(embeddedWallet.id)
-    : undefined;
+  // Server wallet ID is on the User's linked accounts (or user.wallet), not on the connector wallet from useWallets()
+  const walletId = useMemo(() => {
+    if (!user || !walletAddress) return undefined;
+    // Prefer user.wallet.id when it matches our embedded wallet address
+    if (user.wallet?.address?.toLowerCase() === walletAddress.toLowerCase() && user.wallet.id) {
+      return String(user.wallet.id);
+    }
+    // Otherwise find the embedded wallet in linkedAccounts (type 'wallet' with matching address)
+    const walletAccount = user.linkedAccounts?.find(
+      (acc): acc is { type: "wallet"; address: string; id?: string | null } =>
+        acc && typeof acc === "object" && "type" in acc && acc.type === "wallet" && "address" in acc &&
+        String(acc.address).toLowerCase() === walletAddress.toLowerCase()
+    );
+    if (walletAccount && "id" in walletAccount && walletAccount.id != null) {
+      return String(walletAccount.id);
+    }
+    return undefined;
+  }, [user, walletAddress]);
 
   // Track user ID changes
   const currentUserId = user?.id || null;
@@ -131,21 +146,35 @@ export function useAuth() {
         if (isTokenCacheValid) {
           accessToken = cachedAccessToken.current;
         } else {
-          accessToken = await getAccessToken();
-          if (accessToken) {
-            cachedAccessToken.current = accessToken;
-            tokenCacheTime.current = now;
+          try {
+            accessToken = await getAccessToken();
+            if (accessToken) {
+              cachedAccessToken.current = accessToken;
+              tokenCacheTime.current = now;
+            }
+          } catch (tokenError) {
+            console.error("Failed to get access token from Privy:", tokenError);
+            cachedAccessToken.current = null;
+            setAuthState({
+              isAuthenticated: false,
+              token: null,
+              user: null,
+              isLoading: false,
+              error: `Failed to get access token: ${tokenError instanceof Error ? tokenError.message : String(tokenError)}`,
+            });
+            syncInProgress.current = false;
+            return;
           }
         }
         
-        if (!accessToken) {
+        if (!accessToken || accessToken.trim() === "") {
           cachedAccessToken.current = null;
           setAuthState({
             isAuthenticated: false,
             token: null,
             user: null,
             isLoading: false,
-            error: "Failed to get access token",
+            error: "Access token is empty or invalid",
           });
           syncInProgress.current = false;
           return;
@@ -154,12 +183,15 @@ export function useAuth() {
         // Try to login/verify with backend
         let authResponse: api.AuthResponse;
         try {
+          console.log("Attempting login with access token (length:", accessToken.length, ")");
           authResponse = await api.login(accessToken);
-        } catch {
+        } catch (loginError) {
           // If login fails, try signup (first time user)
+          console.log("Login failed, trying signup:", loginError instanceof Error ? loginError.message : String(loginError));
           try {
             authResponse = await api.signup(accessToken);
           } catch (signupError) {
+            console.error("Both login and signup failed:", signupError);
             throw signupError;
           }
         }
@@ -203,30 +235,51 @@ export function useAuth() {
 
           if (currentWallet?.address) {
             const currentWalletAddress = currentWallet.address;
-            
-            // Extract walletId if available
+            // Server wallet ID comes from User (user.wallet.id or linkedAccounts), not from connector wallet
             let currentWalletId: string | undefined;
-            if ('id' in currentWallet && currentWallet.id !== undefined) {
-              currentWalletId = String(currentWallet.id);
-            } else if ('walletId' in currentWallet) {
-              const walletIdValue = (currentWallet as { walletId?: string }).walletId;
-              if (typeof walletIdValue === 'string') {
-                currentWalletId = walletIdValue;
+            if (user.wallet?.address?.toLowerCase() === currentWalletAddress.toLowerCase() && user.wallet.id) {
+              currentWalletId = String(user.wallet.id);
+            } else {
+              const walletAccount = user.linkedAccounts?.find(
+                (acc): acc is { type: "wallet"; address: string; id?: string | null } =>
+                  acc && typeof acc === "object" && "type" in acc && acc.type === "wallet" && "address" in acc &&
+                  String(acc.address).toLowerCase() === currentWalletAddress.toLowerCase()
+              );
+              if (walletAccount && "id" in walletAccount && walletAccount.id != null) {
+                currentWalletId = String(walletAccount.id);
               }
             }
-            
             try {
               // Step 1: Add backend signer to wallet (if server-side signing is enabled)
-              if (!signerSetupDone.current.has(currentWalletAddress) && authResponse.signerId) {
+              // Only attempt if signerId is provided and valid
+              const signerId = authResponse.signerId;
+              const hasValidSignerId = signerId && 
+                                      signerId.trim() !== "" && 
+                                      signerId.length > 10; // Basic validation
+              
+              if (!signerSetupDone.current.has(currentWalletAddress) && hasValidSignerId && signerId) {
                 try {
+                  console.log("Adding backend signer to wallet:", { address: currentWalletAddress, signerId });
                   await addSigners({
                     address: currentWalletAddress,
-                    signers: [{ signerId: authResponse.signerId }],
+                    signers: [{ signerId }],
                   });
                   signerSetupDone.current.add(currentWalletAddress);
-                } catch {
-                  // Continue anyway
+                  console.log("Successfully added backend signer to wallet");
+                } catch (signerError) {
+                  const msg = signerError instanceof Error ? signerError.message : String(signerError);
+                  const isDuplicateSigner = msg.includes("Duplicate signer") || msg.includes("already been added");
+                  if (isDuplicateSigner) {
+                    signerSetupDone.current.add(currentWalletAddress);
+                    console.log("Backend signer already added to wallet");
+                  } else {
+                    console.error("Failed to add signer - this will prevent server-side transactions:", signerError);
+                  }
                 }
+              } else if (!hasValidSignerId) {
+                console.log("Skipping addSigners - signerId not provided or invalid");
+                // Mark as done to prevent retries when signerId is not available
+                signerSetupDone.current.add(currentWalletAddress);
               }
 
               // Step 2: Link wallet to backend (saves to database)
@@ -240,6 +293,7 @@ export function useAuth() {
                 throw new Error("Failed to link wallet - no token received");
               }
               
+              if (currentWalletId) lastLinkedWalletId.current = currentWalletId;
               authResponse = linkResponse;
             } catch (linkError) {
               setAuthState({
@@ -274,18 +328,36 @@ export function useAuth() {
         }
 
         // Ensure signer is added if we have wallet and signerId
-        if (authResponse.token && walletAddress && authResponse.signerId) {
+        const signerId = authResponse.signerId;
+        const hasValidSignerId = signerId && 
+                                signerId.trim() !== "" && 
+                                signerId.length > 10; // Basic validation
+        
+        if (authResponse.token && walletAddress && hasValidSignerId && signerId) {
           if (!signerSetupDone.current.has(walletAddress)) {
             try {
+              console.log("Adding backend signer to wallet:", { address: walletAddress, signerId });
               await addSigners({
                 address: walletAddress,
-                signers: [{ signerId: authResponse.signerId }],
+                signers: [{ signerId }],
               });
               signerSetupDone.current.add(walletAddress);
-            } catch {
-              // Don't fail auth if signer setup fails - user can still use the app
+              console.log("Successfully added backend signer to wallet");
+            } catch (signerError) {
+              const msg = signerError instanceof Error ? signerError.message : String(signerError);
+              const isDuplicateSigner = msg.includes("Duplicate signer") || msg.includes("already been added");
+              if (isDuplicateSigner) {
+                signerSetupDone.current.add(walletAddress);
+                console.log("Backend signer already added to wallet");
+              } else {
+                console.error("Failed to add signer - transactions will fail until this is fixed:", signerError);
+              }
             }
           }
+        } else if (!hasValidSignerId && walletAddress) {
+          console.log("Skipping addSigners - signerId not provided or invalid");
+          // Mark as done to prevent retries when signerId is not available
+          signerSetupDone.current.add(walletAddress);
         }
 
         // If we have a token, get user info
@@ -367,6 +439,25 @@ export function useAuth() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, authenticated, currentUserId, walletAddress, walletId, getAccessToken, addSigners, createWallet]);
 
+  // When walletId appears after we're already linked (e.g. after addSigners / delegation), push it to the backend
+  useEffect(() => {
+    if (!authState.token || !walletAddress || !walletId || walletId === lastLinkedWalletId.current) return;
+    let cancelled = false;
+    getAccessToken()
+      .then((accessToken) => {
+        if (!cancelled && accessToken) {
+          return api.linkWallet(accessToken, walletAddress, walletId);
+        }
+      })
+      .then((res) => {
+        if (!cancelled && res?.token) {
+          lastLinkedWalletId.current = walletId;
+        }
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [authState.token, walletAddress, walletId, getAccessToken]);
+
   const login = async () => {
     await privyLogin();
   };
@@ -387,10 +478,56 @@ export function useAuth() {
     });
   };
 
+  /**
+   * Manually retry adding the backend signer to the wallet.
+   * Call this if you get authorization errors when trying to send transactions.
+   */
+  const retrySignerSetup = async (): Promise<boolean> => {
+    if (!walletAddress || !authState.token) {
+      console.error("Cannot retry signer setup: wallet not available or not authenticated");
+      return false;
+    }
+
+    try {
+      // Get fresh access token
+      const accessToken = await getAccessToken();
+      if (!accessToken) {
+        throw new Error("Failed to get access token");
+      }
+
+      // Get signerId from backend
+      const authResponse = await api.login(accessToken);
+      const signerId = authResponse.signerId;
+      
+      if (!signerId || signerId.trim() === "" || signerId.length <= 10) {
+        console.error("No valid signerId returned from backend");
+        return false;
+      }
+
+      // Clear the done flag to allow retry
+      signerSetupDone.current.delete(walletAddress);
+
+      // Try to add signer
+      console.log("Retrying signer setup:", { address: walletAddress, signerId });
+      await addSigners({
+        address: walletAddress,
+        signers: [{ signerId }],
+      });
+      
+      signerSetupDone.current.add(walletAddress);
+      console.log("Successfully added backend signer to wallet");
+      return true;
+    } catch (error) {
+      console.error("Failed to retry signer setup:", error);
+      return false;
+    }
+  };
+
   return {
     ...authState,
     login,
     logout,
+    retrySignerSetup,
     ready,
     privyUser: user,
     embeddedWallet,

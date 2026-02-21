@@ -1,6 +1,16 @@
 "use client";
 
 import { useState } from "react";
+import { usePosition, useClosePosition } from "@/hooks/usePositions";
+import { useAuth } from "@/lib/auth";
+import { DEFAULT_MARKET_ID, DEFAULT_POOL_KEY } from "@/lib/config";
+import {
+  formatPositionSize,
+  priceFromBigInt,
+  amountFromBigInt,
+  leverageFromBigInt,
+  createPerpIntent,
+} from "@/lib/utils/perp";
 
 type TabId = "positions" | "open-orders" | "position-history" | "historical-pnl" | "order-history" | "trade-history";
 
@@ -15,7 +25,7 @@ const TABS: { id: TabId; label: string; count?: number }[] = [
 
 type MarginMode = "isolated" | "cross";
 
-interface MockPosition {
+interface DisplayPosition {
   symbol: string;
   quantity: string;
   quantityLabel: string;
@@ -34,91 +44,87 @@ interface MockPosition {
   tpSlValue?: string;
 }
 
-// Mock data matching reference: 4 rows, 2 with 12x Isolated, 2 with 28x Cross
-const MOCK_POSITIONS: MockPosition[] = [
-  {
-    symbol: "BTCUSD",
-    quantity: "-123.00",
-    quantityLabel: "BTC",
-    leverage: 12,
-    marginMode: "isolated",
-    entryPrice: "14,456.45 USD",
-    markPrice: "25,463.45",
-    liqPrice: "0.000000000123",
-    margin: "2,445.34 USD",
-    unrealisedPnl: "+467.00 USD",
-    unrealisedPnlPct: "+42%",
-    realisedPnl: "+467.00 USD",
-    realisedPnlPct: "+42%",
-    hasTpSl: false,
-  },
-  {
-    symbol: "BTCUSD",
-    quantity: "-123.00",
-    quantityLabel: "BTC",
-    leverage: 28,
-    marginMode: "cross",
-    entryPrice: "14,456.45 USD",
-    markPrice: "25,463.45",
-    liqPrice: "25,124.56",
-    margin: "2,445.34 USD",
-    unrealisedPnl: "+467.00 USD",
-    unrealisedPnlPct: "+42%",
-    realisedPnl: "+467.00 USD",
-    realisedPnlPct: "+42%",
-    hasTpSl: true,
-    tpSlLabel: "TP 0.45",
-    tpSlValue: "$15,600.00",
-  },
-  {
-    symbol: "BTCUSD",
-    quantity: "-123.00",
-    quantityLabel: "BTC",
-    leverage: 12,
-    marginMode: "isolated",
-    entryPrice: "14,456.45 USD",
-    markPrice: "25,463.45",
-    liqPrice: "0.000000000123",
-    margin: "2,445.34 USD",
-    unrealisedPnl: "+467.00 USD",
-    unrealisedPnlPct: "+42%",
-    realisedPnl: "+467.00 USD",
-    realisedPnlPct: "+42%",
-    hasTpSl: false,
-  },
-  {
-    symbol: "BTCUSD",
-    quantity: "-123.00",
-    quantityLabel: "BTC",
-    leverage: 28,
-    marginMode: "cross",
-    entryPrice: "14,456.45 USD",
-    markPrice: "25,463.45",
-    liqPrice: "25,124.56",
-    margin: "2,445.34 USD",
-    unrealisedPnl: "+467.00 USD",
-    unrealisedPnlPct: "+42%",
-    realisedPnl: "+467.00 USD",
-    realisedPnlPct: "+42%",
-    hasTpSl: true,
-    tpSlLabel: "TP 0.45",
-    tpSlValue: "$15,600.00",
-  },
-];
-
 export function PositionsPanelBox() {
+  const { user, isAuthenticated } = useAuth();
+  const { data: positionData, isLoading } = usePosition(DEFAULT_MARKET_ID);
+  const closePosition = useClosePosition();
+  
   const [activeTab, setActiveTab] = useState<TabId>("positions");
   const [allMarkets, setAllMarkets] = useState(true);
-  const [positions] = useState<MockPosition[]>(MOCK_POSITIONS);
 
-  const handleCloseAll = () => {
-    // TODO: close all positions via API
-    console.log("Close all");
+  // Convert API position to display format
+  const positions: DisplayPosition[] = [];
+  if (positionData?.position && positionData.position.size !== "0") {
+    const pos = positionData.position;
+    const size = formatPositionSize(pos.size);
+    const isLong = !pos.size.startsWith("-");
+    const entryPrice = priceFromBigInt(pos.entryPrice);
+    // Position collateral is stored in 18 decimals in PerpPositionManager
+    const margin = amountFromBigInt(pos.collateral, 18);
+    const leverage = leverageFromBigInt(pos.leverage);
+    
+    // TODO: Get current mark price from market data
+    const markPrice = entryPrice; // Placeholder
+    
+    positions.push({
+      symbol: "ETHUSD", // TODO: Get from market ID
+      quantity: size,
+      quantityLabel: "ETH",
+      leverage: Math.round(leverage),
+      marginMode: "isolated", // TODO: Determine from position
+      entryPrice: entryPrice.toLocaleString("en-US", {
+        style: "currency",
+        currency: "USD",
+        minimumFractionDigits: 2,
+      }),
+      markPrice: markPrice.toLocaleString("en-US", {
+        minimumFractionDigits: 2,
+      }),
+      liqPrice: "0.00", // TODO: Calculate liquidation price
+      margin: margin.toLocaleString("en-US", {
+        style: "currency",
+        currency: "USD",
+        minimumFractionDigits: 2,
+      }),
+      unrealisedPnl: "0.00 USD", // TODO: Calculate from mark price
+      unrealisedPnlPct: "0%",
+      realisedPnl: "0.00 USD",
+      realisedPnlPct: "0%",
+      hasTpSl: false,
+    });
+  }
+
+  const handleCloseAll = async () => {
+    if (!isAuthenticated || !user?.walletAddress || !positionData?.position) {
+      return;
+    }
+
+    try {
+      // Close entire position
+      const intent = createPerpIntent({
+        userAddress: user.walletAddress,
+        marketId: DEFAULT_MARKET_ID,
+        size: Math.abs(parseFloat(formatPositionSize(positionData.position.size))),
+        isLong: !positionData.position.size.startsWith("-"),
+        isOpen: false, // Close position
+        leverage: leverageFromBigInt(positionData.position.leverage),
+      });
+
+      await closePosition.mutateAsync({
+        intent,
+        poolKey: DEFAULT_POOL_KEY,
+      });
+
+      alert("Position closed successfully!");
+    } catch (error) {
+      console.error("Failed to close position:", error);
+      alert(`Failed to close position: ${error instanceof Error ? error.message : "Unknown error"}`);
+    }
   };
 
-  const handleClose = (index: number) => {
-    // TODO: close single position
-    console.log("Close", index);
+  const handleClose = async (index: number) => {
+    // For now, same as close all since we only support one position
+    await handleCloseAll();
   };
 
   return (
@@ -144,7 +150,7 @@ export function PositionsPanelBox() {
                     activeTab === tab.id ? "border-[#363d4a] bg-[#2a303c] text-[#c8cdd4]" : "border-[#363d4a] text-[#7d8590]"
                   }`}
                 >
-                  {tab.count}
+                  {activeTab === "positions" ? positions.length : tab.count}
                 </span>
               )}
             </button>
@@ -180,15 +186,29 @@ export function PositionsPanelBox() {
                   <button
                     type="button"
                     onClick={handleCloseAll}
-                    className="bg-[#2a303c] px-2 py-1 text-[#c8cdd4] hover:bg-[#363d4a]"
+                    disabled={closePosition.isPending || positions.length === 0}
+                    className="bg-[#2a303c] px-2 py-1 text-[#c8cdd4] hover:bg-[#363d4a] disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    Close All
+                    {closePosition.isPending ? "Closing..." : "Close All"}
                   </button>
                 </th>
               </tr>
             </thead>
             <tbody>
-              {positions.map((row, i) => (
+              {isLoading ? (
+                <tr>
+                  <td colSpan={10} className="py-8 text-center text-[#7d8590]">
+                    Loading positions...
+                  </td>
+                </tr>
+              ) : positions.length === 0 ? (
+                <tr>
+                  <td colSpan={10} className="py-8 text-center text-[#7d8590]">
+                    No open positions
+                  </td>
+                </tr>
+              ) : (
+                positions.map((row, i) => (
                 <tr key={i} className="border-b border-[#363d4a] hover:bg-[#2a303c]">
                   <td className="py-2 pl-2">
                     <div className="font-medium text-[#c8cdd4]">{row.symbol}</div>
@@ -244,13 +264,15 @@ export function PositionsPanelBox() {
                     <button
                       type="button"
                       onClick={() => handleClose(i)}
-                      className="bg-[#2a303c] px-2 py-1 text-[#c8cdd4] hover:bg-[#363d4a]"
+                      disabled={closePosition.isPending}
+                      className="bg-[#2a303c] px-2 py-1 text-[#c8cdd4] hover:bg-[#363d4a] disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      Close
+                      {closePosition.isPending ? "Closing..." : "Close"}
                     </button>
                   </td>
                 </tr>
-              ))}
+                ))
+              )}
             </tbody>
           </table>
         </div>

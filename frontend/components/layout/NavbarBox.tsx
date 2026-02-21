@@ -1,14 +1,43 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
+import Link from "next/link";
 import { useAuth } from "@/lib/auth";
-
-const TRADING_ACCOUNT_BALANCE = "$27,594.09";
+import { useBalances } from "@/hooks/useAccount";
+import { amountFromBigInt } from "@/lib/utils/perp";
 
 export function NavbarBox() {
-  const { logout } = useAuth();
+  const { logout, isAuthenticated } = useAuth();
+  const { data: balances, isLoading: balancesLoading } = useBalances();
   const [profileOpen, setProfileOpen] = useState(false);
   const profileRef = useRef<HTMLDivElement>(null);
+
+  const usdcBalance =
+    balances?.usdc != null ? amountFromBigInt(balances.usdc, 6) : 0;
+  const displayBalance =
+    !isAuthenticated
+      ? "—"
+      : balancesLoading
+        ? "..."
+        : usdcBalance.toLocaleString("en-US", {
+            style: "currency",
+            currency: "USD",
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2,
+          });
+
+  useEffect(() => {
+    if (balances != null) {
+      console.log("[Navbar] balance", {
+        endpoint: "GET /api/perp/balances",
+        usdcContract: balances.usdcContract ?? "(not in response)",
+        usdcRaw: balances.usdc,
+        usdtRaw: balances.usdt,
+        usdcFormatted: usdcBalance,
+        displayBalance,
+      });
+    }
+  }, [balances, usdcBalance, displayBalance]);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -24,12 +53,12 @@ export function NavbarBox() {
     <header className="flex h-14 shrink-0 items-center justify-between border-b border-[#363d4a] bg-[#21262e] px-4">
       {/* Logo (left) */}
       <div className="flex items-center gap-2">
-        <a href="/" className="flex items-center gap-2 font-semibold text-[#c8cdd4] hover:text-white">
+        <Link href="/" className="flex items-center gap-2 font-semibold text-[#c8cdd4] hover:text-white">
           <span className="flex h-8 w-8 items-center justify-center bg-[#3d4a5c] text-sm font-bold text-white">
             z
           </span>
           <span className="hidden sm:inline">zkperps</span>
-        </a>
+        </Link>
       </div>
 
       {/* Right: Trading account balance + Profile */}
@@ -37,7 +66,7 @@ export function NavbarBox() {
         {/* Trading account with balance */}
         <div className="flex flex-col items-end">
           <span className="text-[10px] uppercase tracking-wide text-[#7d8590]">Trading account</span>
-          <span className="text-sm font-medium text-[#c8cdd4]">{TRADING_ACCOUNT_BALANCE}</span>
+          <span className="text-sm font-medium text-[#c8cdd4]">{displayBalance}</span>
         </div>
 
         {/* Profile icon + dropdown */}
@@ -55,7 +84,7 @@ export function NavbarBox() {
           </button>
 
           {profileOpen && (
-            <div className="absolute right-0 top-full z-50 mt-1 min-w-[180px] border border-[#363d4a] bg-[#2a303c] py-1 shadow-lg">
+            <div className="absolute right-0 top-full z-50 mt-1 min-w-45 border border-[#363d4a] bg-[#2a303c] py-1 shadow-lg">
               <a
                 href="#profile"
                 className="block px-3 py-2 text-sm text-[#c8cdd4] hover:bg-[#363d4a]"

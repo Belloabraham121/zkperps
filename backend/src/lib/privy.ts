@@ -34,6 +34,39 @@ export interface PrivyUserInfo {
  * Returns Privy user id and, if available, email and wallet. Frontend must have called addSigners
  * with our KEY_QUORUM_ID so we can send tx on behalf of this user.
  */
+/**
+ * Retry helper for network operations that may fail due to transient SSL/network issues
+ */
+async function retryWithBackoff<T>(
+  fn: () => Promise<T>,
+  maxRetries: number = 5,
+  baseDelay: number = 1000
+): Promise<T> {
+  let lastError: Error | unknown;
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (error) {
+      lastError = error;
+      const isSSLError = error instanceof Error && (
+        error.message.includes("SSL") ||
+        error.message.includes("TLS") ||
+        error.message.includes("tlsv1") ||
+        error.message.includes("ECONNRESET") ||
+        error.message.includes("ETIMEDOUT")
+      );
+      
+      if (isSSLError && attempt < maxRetries - 1) {
+        const delay = baseDelay * Math.pow(2, attempt);
+        await new Promise(resolve => setTimeout(resolve, delay));
+        continue;
+      }
+      throw error;
+    }
+  }
+  throw lastError;
+}
+
 export async function verifyAccessToken(
   accessToken: string,
 ): Promise<{
@@ -43,12 +76,31 @@ export async function verifyAccessToken(
   walletId?: string;
 }> {
   const privy = getPrivyClient();
-  const verified = await privy.utils().auth().verifyAccessToken(accessToken);
   
-  if (!verified?.user_id) {
-    throw new Error("Invalid or expired Privy token");
+  // Retry on SSL/network errors only (do not retry InvalidAuthTokenError)
+  let verified;
+  try {
+    // SDK expects the token string only; it adds app_id and verification_key internally
+    verified = await retryWithBackoff(
+      () => privy.utils().auth().verifyAccessToken(accessToken),
+      3,
+      1000
+    );
+  } catch (verifyError) {
+    // Don't retry auth failures - they won't succeed on retry
+    const msg = verifyError instanceof Error ? verifyError.message : String(verifyError);
+    if (msg.includes("Failed to verify authentication token") || msg.includes("InvalidAuthTokenError")) {
+      throw new Error("Invalid or expired login. Please sign in again.");
+    }
+    throw new Error(`Failed to verify token with Privy: ${msg}`);
   }
-  const userId = verified.user_id;
+
+  // Response uses user_id (snake_case) per VerifyAccessTokenResponse
+  const userId = (verified as { user_id?: string }).user_id;
+  if (!userId) {
+    console.error("[verifyAccessToken] Token verification returned no userId:", verified);
+    throw new Error("Invalid or expired Privy token - no userId found");
+  }
 
   // Check database for existing wallet
   const stored = await getUserWalletsCollection().findOne({ privyUserId: userId });
@@ -87,30 +139,38 @@ export async function linkWallet(
   if (!finalWalletId) {
     try {
       const privy = getPrivyClient();
-      const user = await (
-        privy as {
-          users?: () => {
-            _get: (
-              id: string,
-            ) => Promise<{
-              linked_accounts_v2?: Array<{
-                type: string;
-                address?: string;
-                wallet_id?: string;
-              }>;
+      const privyWithUsers = privy as {
+        users?: () => {
+          _get: (
+            id: string,
+          ) => Promise<{
+            linked_accounts_v2?: Array<{
+              type: string;
+              address?: string;
+              wallet_id?: string;
             }>;
-          };
+          }>;
+        };
+      };
+      
+      const usersApi = privyWithUsers.users?.();
+      if (usersApi) {
+        const user = await retryWithBackoff(
+          async () => {
+            const result = await usersApi._get(privyUserId);
+            return result;
+          },
+          5,
+          1000
+        );
+        
+        const walletAccount = user?.linked_accounts_v2?.find(
+          (a) => a.address?.toLowerCase() === walletAddress.toLowerCase()
+        );
+        
+        if (walletAccount?.wallet_id) {
+          finalWalletId = walletAccount.wallet_id;
         }
-      )
-        .users?.()
-        ._get(privyUserId);
-      
-      const walletAccount = user?.linked_accounts_v2?.find(
-        (a) => a.address?.toLowerCase() === walletAddress.toLowerCase()
-      );
-      
-      if (walletAccount?.wallet_id) {
-        finalWalletId = walletAccount.wallet_id;
       }
     } catch (error) {
       // Continue without walletId

@@ -1,162 +1,100 @@
 "use client";
 
 import { useState } from "react";
+import { toast } from "sonner";
+import { useAuth } from "@/lib/auth";
+import { useOpenPosition } from "@/hooks/useTrading";
+import { createPerpIntent } from "@/lib/utils/perp";
+import { DEFAULT_MARKET_ID, DEFAULT_POOL_KEY } from "@/lib/config";
+import * as perpApi from "@/lib/api/perp";
 
-type OrderType = "limit" | "market" | "conditional";
-type MarginMode = "isolated" | "cross";
 type Side = "long" | "short";
 
 const LEVERAGE_MIN = 1;
 const LEVERAGE_MAX = 10;
 
+/**
+ * Order panel aligned with the smart contract:
+ * - PerpPositionManager: openPosition(user, market, size, isLong, leverage) with collateral = (size × entryPrice) / leverage
+ * - No limit/conditional orders: execution is batch-based at batch execution price
+ * - Single collateral pool: deposit collateral first, then open positions; margin = collateral locked per position
+ */
 export function OrderPanelBox() {
-  const [orderType, setOrderType] = useState<OrderType>("market");
-  const [marginMode, setMarginMode] = useState<MarginMode>("isolated");
+  const { user, token, isAuthenticated } = useAuth();
+  const openPosition = useOpenPosition();
+
   const [side, setSide] = useState<Side>("long");
   const [leverage, setLeverage] = useState(10);
   const [size, setSize] = useState("");
   const [margin, setMargin] = useState("");
-  const [limitPrice, setLimitPrice] = useState("");
-  const [triggerPrice, setTriggerPrice] = useState("");
-  const [triggerBy, setTriggerBy] = useState<"mark" | "last">("mark");
-  const [showTpSl, setShowTpSl] = useState(false);
-  const [errors, setErrors] = useState<{ size?: string; margin?: string; limitPrice?: string; triggerPrice?: string }>({});
+  const [errors, setErrors] = useState<{ size?: string; margin?: string }>({});
+  const [clearing, setClearing] = useState(false);
 
   const validate = (): boolean => {
     const next: typeof errors = {};
     const sizeNum = parseFloat(size);
     if (size === "" || isNaN(sizeNum) || sizeNum <= 0) {
-      next.size = "Enter size";
+      next.size = "Enter size (positive)";
     }
     const marginNum = parseFloat(margin);
     if (margin === "" || isNaN(marginNum) || marginNum < 0) {
       next.margin = "Enter margin";
     }
-    if (orderType === "limit") {
-      const lp = parseFloat(limitPrice);
-      if (limitPrice === "" || isNaN(lp) || lp <= 0) next.limitPrice = "Enter limit price";
-    }
-    if (orderType === "conditional") {
-      const tp = parseFloat(triggerPrice);
-      if (triggerPrice === "" || isNaN(tp) || tp <= 0) next.triggerPrice = "Enter trigger price";
-    }
     setErrors(next);
     return Object.keys(next).length === 0;
   };
 
-  const handleOpenPosition = (e: React.FormEvent<HTMLFormElement>) => {
+  const handleOpenPosition = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+
+    if (!isAuthenticated || !user?.walletAddress) {
+      toast.error("Please sign in to place orders");
+      return;
+    }
+
     const submitter = (e.nativeEvent as SubmitEvent).submitter;
     const chosenSide = submitter?.getAttribute("data-side") as Side | null;
     if (chosenSide) setSide(chosenSide);
+
     if (!validate()) return;
-    // TODO: wire to API / contract (submitCommitment, etc.)
-    console.log("Open position", {
-      side: chosenSide ?? side,
-      orderType,
-      marginMode,
-      leverage,
-      size,
-      margin,
-      ...(orderType === "limit" && { limitPrice }),
-      ...(orderType === "conditional" && { triggerBy, triggerPrice }),
-    });
+
+    const finalSide = chosenSide ?? side;
+    const sizeNum = parseFloat(size);
+    const marginNum = parseFloat(margin);
+
+    try {
+      const intent = createPerpIntent({
+        userAddress: user.walletAddress,
+        marketId: DEFAULT_MARKET_ID,
+        size: sizeNum,
+        isLong: finalSide === "long",
+        isOpen: true,
+        collateral: marginNum,
+        leverage,
+      });
+
+      const result = await openPosition.mutateAsync({
+        intent,
+        poolKey: DEFAULT_POOL_KEY,
+      });
+
+      setSize("");
+      setMargin("");
+
+      toast.success("Order submitted! It will execute in the next batch.", {
+        description: `Commit: ${result.commitTxHash.slice(0, 10)}... Reveal: ${result.revealTxHash.slice(0, 10)}...`,
+      });
+    } catch (error) {
+      console.error("Failed to open position:", error);
+      toast.error("Failed to open position", {
+        description: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
   };
 
   return (
     <aside className="flex w-80 shrink-0 flex-col border-b border-[#363d4a] bg-[#21262e] p-3">
       <form onSubmit={handleOpenPosition} className="flex flex-col gap-3">
-        {/* Order type: Limit | Market | Conditional - square tabs, no border */}
-        <div className="flex bg-[#2a303c] p-0.5">
-          {(["limit", "market", "conditional"] as const).map((t) => (
-            <button
-              key={t}
-              type="button"
-              onClick={() => setOrderType(t)}
-              className={`flex-1 px-2 py-1.5 text-xs font-medium capitalize ${
-                orderType === t ? "bg-[#3d4a5c] text-white" : "text-[#7d8590] hover:text-[#c8cdd4]"
-              }`}
-            >
-              {t}
-            </button>
-          ))}
-        </div>
-
-        {/* Margin mode: Isolated | Cross - square tabs, no border */}
-        <div className="flex bg-[#2a303c] p-0.5">
-          {(["isolated", "cross"] as const).map((m) => (
-            <button
-              key={m}
-              type="button"
-              onClick={() => setMarginMode(m)}
-              className={`flex-1 px-2 py-1.5 text-xs font-medium capitalize ${
-                marginMode === m ? "bg-[#3d4a5c] text-white" : "text-[#7d8590] hover:text-[#c8cdd4]"
-              }`}
-            >
-              {m}
-            </button>
-          ))}
-        </div>
-
-        {/* Limit: show limit price */}
-        {orderType === "limit" && (
-          <div>
-            <label className="mb-1 block text-xs text-[#7d8590]">Limit price</label>
-            <input
-              type="text"
-              inputMode="decimal"
-              placeholder="0.00"
-              value={limitPrice}
-              onChange={(e) => setLimitPrice(e.target.value)}
-              className={`w-full border bg-[#2a303c] px-2 py-1.5 text-sm text-[#c8cdd4] placeholder:text-[#7d8590] ${
-                errors.limitPrice ? "border-[#b54a4a]" : "border-[#363d4a]"
-              }`}
-            />
-            {errors.limitPrice && <p className="mt-0.5 text-xs text-[#b54a4a]">{errors.limitPrice}</p>}
-          </div>
-        )}
-
-        {/* Conditional: trigger by + trigger price - square tabs */}
-        {orderType === "conditional" && (
-          <div className="space-y-2 border border-[#363d4a] bg-[#2a303c] p-2">
-            <div className="text-xs font-medium text-[#7d8590]">Trigger</div>
-            <div className="flex bg-[#21262e] p-0.5">
-              <button
-                type="button"
-                onClick={() => setTriggerBy("mark")}
-                className={`flex-1 px-2 py-1 text-xs capitalize ${
-                  triggerBy === "mark" ? "bg-[#3d4a5c] text-white" : "text-[#7d8590] hover:text-[#c8cdd4]"
-                }`}
-              >
-                Mark price
-              </button>
-              <button
-                type="button"
-                onClick={() => setTriggerBy("last")}
-                className={`flex-1 px-2 py-1 text-xs capitalize ${
-                  triggerBy === "last" ? "bg-[#3d4a5c] text-white" : "text-[#7d8590] hover:text-[#c8cdd4]"
-                }`}
-              >
-                Last price
-              </button>
-            </div>
-            <div>
-              <label className="mb-1 block text-xs text-[#7d8590]">Trigger price</label>
-              <input
-                type="text"
-                inputMode="decimal"
-                placeholder="0.00"
-                value={triggerPrice}
-                onChange={(e) => setTriggerPrice(e.target.value)}
-                className={`w-full border bg-[#2a303c] px-2 py-1.5 text-sm text-[#c8cdd4] placeholder:text-[#7d8590] ${
-                  errors.triggerPrice ? "border-[#b54a4a]" : "border-[#363d4a]"
-                }`}
-              />
-              {errors.triggerPrice && <p className="mt-0.5 text-xs text-[#b54a4a]">{errors.triggerPrice}</p>}
-            </div>
-          </div>
-        )}
-
         {/* Leverage: 1x–10x */}
         <div>
           <div className="mb-1 flex items-center justify-between text-xs">
@@ -173,9 +111,14 @@ export function OrderPanelBox() {
           />
         </div>
 
-        {/* Size */}
+        {/* Size: position size in base asset (e.g. ETH for ETH/USD) */}
         <div>
-          <label className="mb-1 block text-xs text-[#7d8590]">Size</label>
+          <label className="mb-1 block text-xs text-[#7d8590]">
+            Size (base asset)
+          </label>
+          <p className="mb-1 text-[10px] text-[#7d8590]">
+            How much you want to trade (e.g. 0.1 ETH for ETH/USD)
+          </p>
           <input
             type="text"
             inputMode="decimal"
@@ -187,31 +130,14 @@ export function OrderPanelBox() {
             }`}
           />
           {errors.size && <p className="mt-0.5 text-xs text-[#b54a4a]">{errors.size}</p>}
-          <div className="mt-1 flex gap-1">
-            {[10, 25, 50, 75, 100].map((pct) => (
-              <button
-                key={pct}
-                type="button"
-                onClick={() => setSize("")}
-                className="px-1.5 py-0.5 text-xs text-[#7d8590] hover:bg-[#363d4a] hover:text-[#c8cdd4]"
-              >
-                {pct}%
-              </button>
-            ))}
-          </div>
         </div>
 
-        {/* Margin (label changes by Isolated / Cross) */}
+        {/* Margin: collateral locked for this position. Contract: required margin = (size × price) / leverage */}
         <div>
-          <label className="mb-1 block text-xs text-[#7d8590]">
-            Margin {marginMode === "isolated" ? "(Isolated)" : "(Cross)"}
-          </label>
-          {marginMode === "isolated" && (
-            <p className="mb-1 text-[10px] text-[#7d8590]">Risk limited to this position’s margin</p>
-          )}
-          {marginMode === "cross" && (
-            <p className="mb-1 text-[10px] text-[#7d8590]">Uses shared account margin</p>
-          )}
+          <label className="mb-1 block text-xs text-[#7d8590]">Margin</label>
+          <p className="mb-1 text-[10px] text-[#7d8590]">
+            Collateral locked for this position (in USDC). Required ≈ (size × price) ÷ leverage
+          </p>
           <input
             type="text"
             inputMode="decimal"
@@ -225,59 +151,75 @@ export function OrderPanelBox() {
           {errors.margin && <p className="mt-0.5 text-xs text-[#b54a4a]">{errors.margin}</p>}
         </div>
 
-        {/* Take Profit / Stop Loss (optional) */}
-        <div>
-          <button
-            type="button"
-            onClick={() => setShowTpSl(!showTpSl)}
-            className="text-xs text-[#7d8590] hover:text-[#c8cdd4]"
-          >
-            {showTpSl ? "−" : "+"} Take Profit / Stop Loss
-          </button>
-          {showTpSl && (
-            <div className="mt-1 flex gap-2">
-              <input
-                type="text"
-                placeholder="TP"
-                className="w-full border border-[#363d4a] bg-[#2a303c] px-2 py-1 text-xs text-[#c8cdd4] placeholder:text-[#7d8590]"
-              />
-              <input
-                type="text"
-                placeholder="SL"
-                className="w-full border border-[#363d4a] bg-[#2a303c] px-2 py-1 text-xs text-[#c8cdd4] placeholder:text-[#7d8590]"
-              />
-            </div>
-          )}
-        </div>
-
-        {/* Open Long / Open Short - square, no border */}
+        {/* Open Long / Open Short */}
         <div className="flex gap-2">
           <button
             type="submit"
             name="side"
             data-side="long"
-            className="flex-1 bg-[#2d5a4a] py-2 text-sm font-medium text-white hover:bg-[#3d6a5a]"
+            disabled={openPosition.isPending || !isAuthenticated}
+            className="flex-1 bg-[#2d5a4a] py-2 text-sm font-medium text-white hover:bg-[#3d6a5a] disabled:cursor-not-allowed disabled:opacity-50"
           >
-            Open Long
+            {openPosition.isPending ? "Submitting..." : "Open Long"}
           </button>
           <button
             type="submit"
             name="side"
             data-side="short"
-            className="flex-1 bg-[#5a3d3d] py-2 text-sm font-medium text-white hover:bg-[#6a4d4d]"
+            disabled={openPosition.isPending || !isAuthenticated}
+            className="flex-1 bg-[#5a3d3d] py-2 text-sm font-medium text-white hover:bg-[#6a4d4d] disabled:cursor-not-allowed disabled:opacity-50"
           >
-            Open Short
+            {openPosition.isPending ? "Submitting..." : "Open Short"}
           </button>
         </div>
 
-        {/* Placeholder summary */}
+        {openPosition.isError && (
+          <div className="rounded border border-red-500 bg-red-500/10 p-2 text-xs text-red-400">
+            {openPosition.error instanceof Error
+              ? openPosition.error.message
+              : "Failed to submit order"}
+          </div>
+        )}
+
         <div className="grid grid-cols-2 gap-1 text-xs text-[#7d8590]">
           <span>Value</span>
           <span className="text-right">—</span>
-          <span>Cost</span>
-          <span className="text-right">—</span>
           <span>Est. Liq. Price</span>
           <span className="text-right">—</span>
+        </div>
+
+        <div className="mt-3 border-t border-[#363d4a] pt-3">
+          <button
+            type="button"
+            disabled={clearing || !isAuthenticated || !token}
+            onClick={async () => {
+              if (!token) {
+                toast.error("Not signed in");
+                return;
+              }
+              setClearing(true);
+              try {
+                const res = await perpApi.clearPendingBatch(token);
+                toast.success(
+                  res.deletedCount > 0
+                    ? `Cleared ${res.deletedCount} pending reveal(s). You can place new orders.`
+                    : "No pending reveals to clear."
+                );
+              } catch (e) {
+                toast.error(
+                  e instanceof Error ? e.message : "Failed to clear pending batch"
+                );
+              } finally {
+                setClearing(false);
+              }
+            }}
+            className="w-full rounded border border-[#363d4a] bg-[#2a303c] py-1.5 text-xs text-[#7d8590] hover:border-[#5b6b7a] hover:text-[#c8cdd4] disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {clearing ? "Clearing..." : "Clear pending batch"}
+          </button>
+          <p className="mt-1 text-[10px] text-[#7d8590]">
+            Use if batch keeps failing (e.g. old bad reveals). Then place 2 new orders.
+          </p>
         </div>
       </form>
     </aside>

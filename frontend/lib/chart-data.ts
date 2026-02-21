@@ -56,11 +56,9 @@ export function getOhlcvSummary(
   const last = candles[candles.length - 1];
   let high = first.high;
   let low = first.low;
-  let totalVol = 0;
   for (const c of candles) {
     if (c.high > high) high = c.high;
     if (c.low < low) low = c.low;
-    totalVol += (c as { volume?: number }).volume ?? 0;
   }
   const open = first.open;
   const close = last.close;

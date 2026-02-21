@@ -185,7 +185,7 @@ contract PrivBatchHook is BaseHook, IUnlockCallback {
     IPerpPositionManager public perpPositionManager;
 
     // Configurable parameters
-    uint256 public constant MIN_COMMITMENTS = 2;
+    uint256 public constant MIN_COMMITMENTS = 1;
     uint256 public constant BATCH_INTERVAL = 5 minutes;
 
     // Note: Automation removed - batch execution is permissionless

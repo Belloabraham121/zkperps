@@ -3,34 +3,6 @@
  */
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000";
-const MAX_RETRIES = 5;
-const RETRY_DELAY = 1000; // 1 second between retries
-
-/**
- * Retry a fetch request up to MAX_RETRIES times
- */
-async function fetchWithRetry(
-  url: string,
-  options: RequestInit,
-  retries = MAX_RETRIES
-): Promise<Response> {
-  try {
-    const response = await fetch(url, options);
-    return response;
-  } catch (error) {
-    // Only retry on network errors (Failed to fetch)
-    if (
-      retries > 0 &&
-      error instanceof TypeError &&
-      error.message === "Failed to fetch"
-    ) {
-      // Wait before retrying
-      await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY));
-      return fetchWithRetry(url, options, retries - 1);
-    }
-    throw error;
-  }
-}
 
 export interface AuthResponse {
   token: string | null;
@@ -51,7 +23,11 @@ export interface UserInfo {
  */
 export async function signup(accessToken: string): Promise<AuthResponse> {
   try {
-    const res = await fetchWithRetry(`${API_URL}/api/auth/signup`, {
+    if (!accessToken || accessToken.trim() === "") {
+      throw new Error("Access token is required");
+    }
+
+    const res = await fetch(`${API_URL}/api/auth/signup`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -60,15 +36,17 @@ export async function signup(accessToken: string): Promise<AuthResponse> {
     });
 
     if (!res.ok) {
-      const error = await res.json().catch(() => ({ error: "Signup failed" }));
-      throw new Error(error.error || "Signup failed");
+      const errorData = await res.json().catch(() => ({ error: `Signup failed with status ${res.status}` }));
+      const errorMessage = errorData.error || `Signup failed with status ${res.status}`;
+      console.error("Signup error:", { status: res.status, error: errorMessage, accessTokenLength: accessToken?.length });
+      throw new Error(errorMessage);
     }
 
     return res.json();
   } catch (error) {
     if (error instanceof TypeError && error.message === "Failed to fetch") {
       throw new Error(
-        `Cannot connect to backend at ${API_URL} after ${MAX_RETRIES} attempts. Make sure the backend server is running.`
+        `Cannot connect to backend at ${API_URL}. Make sure the backend server is running.`
       );
     }
     throw error;
@@ -80,7 +58,11 @@ export async function signup(accessToken: string): Promise<AuthResponse> {
  */
 export async function login(accessToken: string): Promise<AuthResponse> {
   try {
-    const res = await fetchWithRetry(`${API_URL}/api/auth/login`, {
+    if (!accessToken || accessToken.trim() === "") {
+      throw new Error("Access token is required");
+    }
+
+    const res = await fetch(`${API_URL}/api/auth/login`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -89,15 +71,17 @@ export async function login(accessToken: string): Promise<AuthResponse> {
     });
 
     if (!res.ok) {
-      const error = await res.json().catch(() => ({ error: "Login failed" }));
-      throw new Error(error.error || "Login failed");
+      const errorData = await res.json().catch(() => ({ error: `Login failed with status ${res.status}` }));
+      const errorMessage = errorData.error || `Login failed with status ${res.status}`;
+      console.error("Login error:", { status: res.status, error: errorMessage, accessTokenLength: accessToken?.length });
+      throw new Error(errorMessage);
     }
 
     return res.json();
   } catch (error) {
     if (error instanceof TypeError && error.message === "Failed to fetch") {
       throw new Error(
-        `Cannot connect to backend at ${API_URL} after ${MAX_RETRIES} attempts. Make sure the backend server is running.`
+        `Cannot connect to backend at ${API_URL}. Make sure the backend server is running.`
       );
     }
     throw error;
@@ -113,7 +97,7 @@ export async function linkWallet(
   walletId?: string
 ): Promise<AuthResponse> {
   try {
-    const res = await fetchWithRetry(`${API_URL}/api/auth/link`, {
+    const res = await fetch(`${API_URL}/api/auth/link`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -130,7 +114,7 @@ export async function linkWallet(
   } catch (error) {
     if (error instanceof TypeError && error.message === "Failed to fetch") {
       throw new Error(
-        `Cannot connect to backend at ${API_URL} after ${MAX_RETRIES} attempts. Make sure the backend server is running.`
+        `Cannot connect to backend at ${API_URL}. Make sure the backend server is running.`
       );
     }
     throw error;
@@ -142,7 +126,7 @@ export async function linkWallet(
  */
 export async function getMe(token: string): Promise<UserInfo> {
   try {
-    const res = await fetchWithRetry(`${API_URL}/api/auth/me`, {
+    const res = await fetch(`${API_URL}/api/auth/me`, {
       method: "GET",
       headers: {
         Authorization: `Bearer ${token}`,
@@ -158,7 +142,7 @@ export async function getMe(token: string): Promise<UserInfo> {
   } catch (error) {
     if (error instanceof TypeError && error.message === "Failed to fetch") {
       throw new Error(
-        `Cannot connect to backend at ${API_URL} after ${MAX_RETRIES} attempts. Make sure the backend server is running.`
+        `Cannot connect to backend at ${API_URL}. Make sure the backend server is running.`
       );
     }
     throw error;

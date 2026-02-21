@@ -12,6 +12,7 @@ import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 import {Actions} from "v4-periphery/src/libraries/Actions.sol";
 import {Planner, Plan} from "v4-periphery/test/shared/Planner.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
+import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {LiquidityAmounts} from "@uniswap/v4-core/test/utils/LiquidityAmounts.sol";
 import {IERC20} from "forge-std/interfaces/IERC20.sol";
 import {IAllowanceTransfer} from "permit2/src/interfaces/IAllowanceTransfer.sol";
@@ -95,19 +96,15 @@ contract SetupPoolLiquidity is Script {
         });
         PoolId poolId = poolKey.toId();
 
-        // Step 1: Initialize pool (if not already initialized)
+        // Step 1: Initialize pool only if not already initialized (avoids broadcasting a reverting tx)
         console.log("\n=== Step 1: Initializing Pool ===");
+        (uint160 slot0SqrtPriceX96,,,) = StateLibrary.getSlot0(poolManager, poolId);
         uint160 sqrtPriceX96 = uint160(79228162514264337593543950336); // 2^96 (1:1 price)
-        try poolManager.initialize(poolKey, sqrtPriceX96) returns (int24 tick) {
+        if (slot0SqrtPriceX96 == 0) {
+            int24 tick = poolManager.initialize(poolKey, sqrtPriceX96);
             console.log("Pool initialized, tick:", tick);
-        } catch (bytes memory reason) {
-            // Check if error is PoolAlreadyInitialized (0x7983c051)
-            // forge-lint: disable-next-line(unsafe-typecast)
-            if (reason.length >= 4 && bytes4(reason) == bytes4(0x7983c051)) {
-                console.log("Pool already initialized, skipping...");
-            } else {
-                revert("Pool initialization failed");
-            }
+        } else {
+            console.log("Pool already initialized, skipping...");
         }
 
         // Step 2: Approve tokens via Permit2

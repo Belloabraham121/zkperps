@@ -4,6 +4,8 @@ import { config } from "./config.js";
 import { connectDB } from "./lib/db.js";
 import { authRouter } from "./routes/auth.js";
 import { tradeRouter } from "./routes/trade.js";
+import { perpRouter } from "./routes/perp.js";
+import { startPerpBatchKeeper } from "./lib/keeper.js";
 
 const app = express();
 app.use(cors({ origin: true, credentials: true }));
@@ -11,6 +13,7 @@ app.use(express.json());
 
 app.use("/api/auth", authRouter);
 app.use("/api/trade", tradeRouter);
+app.use("/api/perp", perpRouter);
 
 app.get("/health", (_req, res) => {
   res.json({ ok: true });
@@ -41,14 +44,17 @@ async function startServer() {
   console.log(`    GET  ${base}/health`);
   console.log(`    *    ${base}/api/auth/*`);
   console.log(`    *    ${base}/api/trade/*`);
+  console.log(`    *    ${base}/api/perp/*`);
   console.log("----------------------------------------");
   console.log("  Config:");
   console.log(`    Chain ID:  ${config.chainId}`);
   console.log(`    RPC URL:   ${config.rpcUrl ? "[set]" : "[not set]"}`);
   console.log(`    Privy:     ${config.privy.appId ? "configured" : "not configured"}`);
   console.log(`    JWT:       expires in ${config.jwtExpiresIn}`);
+  console.log(`    Keeper:    ${config.keeper.privyUserId ? "enabled (auto execute-batch)" : "disabled (set KEEPER_PRIVY_USER_ID to enable)"}`);
   console.log("========================================");
   console.log("");
+      startPerpBatchKeeper();
     });
   } catch (error) {
     console.error("[Server] Failed to start:", error);

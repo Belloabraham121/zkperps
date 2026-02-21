@@ -2,8 +2,7 @@
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { PrivyProvider } from "@privy-io/react-auth";
-import { useState } from "react";
-import { arbitrumSepolia } from "viem/chains";
+import { useState, useEffect } from "react";
 import "@/lib/suppress-extension-errors";
 
 export function Providers({ children }: { children: React.ReactNode }) {
@@ -36,8 +35,6 @@ export function Providers({ children }: { children: React.ReactNode }) {
           createOnLogin: "all-users", // Create wallet immediately for all users on login
         },
       }}
-      defaultChain={arbitrumSepolia}
-      supportedChains={[arbitrumSepolia]}
     >
       <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
     </PrivyProvider>

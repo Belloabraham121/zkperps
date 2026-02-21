@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   createChart,
   CandlestickSeries,
@@ -10,6 +10,13 @@ import {
   type ISeriesApi,
 } from "lightweight-charts";
 import { generateCandleData, getOhlcvSummary } from "@/lib/chart-data";
+import {
+  fetchEthUsdOhlc,
+  coingeckoOhlcToChart,
+  TIMEFRAME_TO_DAYS,
+  hasCoingeckoApiKey,
+} from "@/lib/coingecko";
+import type { CandlestickData, HistogramData, UTCTimestamp } from "lightweight-charts";
 
 const TIMEFRAMES = ["1M", "15M", "1H", "1D", "1W"] as const;
 const INTERVAL_MIN: Record<(typeof TIMEFRAMES)[number], number> = {
@@ -22,6 +29,26 @@ const INTERVAL_MIN: Record<(typeof TIMEFRAMES)[number], number> = {
 const CANDLE_COUNT = 80;
 const BASE_PRICE = 27554;
 
+type ChartData = {
+  candles: CandlestickData<UTCTimestamp>[];
+  volume: HistogramData<UTCTimestamp>[];
+  summary: { open: number; high: number; low: number; close: number; volumePct: number; amplitudePct: number };
+};
+
+function getMockChartData(timeframe: (typeof TIMEFRAMES)[number]): ChartData {
+  const { candles, volume } = generateCandleData(
+    BASE_PRICE,
+    CANDLE_COUNT,
+    INTERVAL_MIN[timeframe]
+  );
+  const s = getOhlcvSummary(candles);
+  return {
+    candles,
+    volume,
+    summary: { ...s, volumePct: 0.02, amplitudePct: s.amplitudePct || 0.33 },
+  };
+}
+
 export function PriceChart() {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -29,24 +56,39 @@ export function PriceChart() {
   const volumeSeriesRef = useRef<ISeriesApi<"Histogram"> | null>(null);
   const [timeframe, setTimeframe] = useState<(typeof TIMEFRAMES)[number]>("1M");
   const [activeTab, setActiveTab] = useState<"Price" | "Funding">("Price");
+  const [chartData, setChartData] = useState<ChartData>(() => getMockChartData("1M"));
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const chartData = useMemo(() => {
-    const { candles, volume } = generateCandleData(
-      BASE_PRICE,
-      CANDLE_COUNT,
-      INTERVAL_MIN[timeframe]
-    );
-    const s = getOhlcvSummary(candles);
-    return {
-      candles,
-      volume,
-      summary: {
-        ...s,
-        volumePct: 0.02,
-        amplitudePct: s.amplitudePct || 0.33,
-      },
-    };
-  }, [timeframe]);
+  const loadData = useCallback(async (tf: (typeof TIMEFRAMES)[number]) => {
+    if (!hasCoingeckoApiKey()) {
+      setChartData(getMockChartData(tf));
+      setError(null);
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    const days = TIMEFRAME_TO_DAYS[tf] ?? 7;
+    try {
+      const raw = await fetchEthUsdOhlc(days);
+      const { candles, volume } = coingeckoOhlcToChart(raw);
+      const summary = getOhlcvSummary(candles);
+      setChartData({
+        candles,
+        volume,
+        summary: { ...summary, volumePct: 0.02, amplitudePct: summary.amplitudePct || 0 },
+      });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load chart data");
+      setChartData(getMockChartData(tf));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadData(timeframe);
+  }, [timeframe, loadData]);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -109,9 +151,19 @@ export function PriceChart() {
       candleSeriesRef.current = null;
       volumeSeriesRef.current = null;
     };
-    // chartData is derived from timeframe; re-create chart only when timeframe changes
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- chartData.candles/volume omitted on purpose
+    // Chart is created per timeframe; data updates are applied in the effect below.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- chartData applied in separate effect
   }, [timeframe]);
+
+  useEffect(() => {
+    const chart = chartRef.current;
+    const candleSeries = candleSeriesRef.current;
+    const volumeSeries = volumeSeriesRef.current;
+    if (!chart || !candleSeries || !volumeSeries || !chartData.candles.length) return;
+    candleSeries.setData(chartData.candles);
+    volumeSeries.setData(chartData.volume);
+    chart.timeScale().fitContent();
+  }, [chartData.candles, chartData.volume]);
 
   const formatPrice = (p: number) => p.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const utcTime = new Date().toISOString().slice(11, 19) + " UTC";
@@ -189,6 +241,9 @@ export function PriceChart() {
 
       {/* Data bar */}
       <div className="flex flex-wrap items-center gap-4 border-b border-[#363d4a] px-2 py-1.5 text-xs text-[#7d8590]">
+        {loading && <span className="text-amber-400">Loading…</span>}
+        {error && <span className="text-red-400" title={error}>Error (showing mock)</span>}
+        {!loading && hasCoingeckoApiKey() && !error && <span className="text-emerald-500/90">ETH/USD · CoinGecko</span>}
         <span><strong className="text-[#c8cdd4]">Open:</strong> {formatPrice(chartData.summary.open)}</span>
         <span><strong className="text-[#c8cdd4]">High:</strong> {formatPrice(chartData.summary.high)}</span>
         <span><strong className="text-[#c8cdd4]">Low:</strong> {formatPrice(chartData.summary.low)}</span>
