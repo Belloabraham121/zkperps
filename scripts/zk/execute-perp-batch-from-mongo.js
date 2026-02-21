@@ -7,7 +7,7 @@
  * 2. Read pendingPerpReveals for the default pool (poolId from pool key).
  * 3. Optionally check batch interval on chain; fund Hook if needed.
  * 4. Call revealAndBatchExecutePerps(poolKey, commitmentHashes, baseIsCurrency0).
- * 5. Optionally remove executed hashes from pendingPerpReveals (--clear).
+ * 5. Mark executed hashes as executed: true in pendingPerpReveals; optionally remove them (--clear).
  *
  * Usage:
  *   node execute-perp-batch-from-mongo.js [--clear] [--no-wait]
@@ -19,7 +19,7 @@
  *   HOOK_ADDRESS, MOCK_USDC, MOCK_USDT (optional; use DEPLOYED on Arbitrum Sepolia)
  *   BASE_IS_CURRENCY0 (optional, default true)
  *
- * --clear   After successful execute, delete the executed commitment hashes from pendingPerpReveals.
+ * --clear   After successful execute, delete the executed commitment hashes from pendingPerpReveals (otherwise only executed: true is set).
  * --no-wait Skip batch-interval check (call execute anyway; may revert if interval not met).
  */
 
@@ -145,7 +145,8 @@ async function main() {
     await client.connect();
     const db = client.db(MONGODB_DB_NAME);
     const coll = db.collection("pendingPerpReveals");
-    const docs = await coll.find({ poolId }).sort({ createdAt: 1 }).toArray();
+    // Only non-executed commitments (executed not true; missing field treated as pending)
+    const docs = await coll.find({ poolId, executed: { $ne: true } }).sort({ createdAt: 1 }).toArray();
     commitmentHashes = docs.map((d) => d.commitmentHash);
     console.log("  Found", commitmentHashes.length, "pending commitment(s)");
   } catch (e) {
@@ -294,21 +295,24 @@ async function main() {
     process.exit(1);
   }
 
-  // 6. Optional: clear executed hashes from MongoDB
-  if (clearAfter) {
-    console.log("\n--- 3. Clear executed hashes from MongoDB ---");
-    try {
-      const client3 = new MongoClient(MONGODB_URI);
-      await client3.connect();
-      const result = await client3
-        .db(MONGODB_DB_NAME)
-        .collection("pendingPerpReveals")
-        .deleteMany({ poolId, commitmentHash: { $in: commitmentHashes } });
-      await client3.close();
-      console.log("  Deleted", result.deletedCount, "pending reveal(s)");
-    } catch (e) {
-      console.warn("  Could not clear pending:", e.message);
+  // 6. Mark executed in MongoDB; optionally delete (--clear)
+  console.log("\n--- 3. Mark executed in MongoDB ---");
+  try {
+    const client3 = new MongoClient(MONGODB_URI);
+    await client3.connect();
+    const coll = client3.db(MONGODB_DB_NAME).collection("pendingPerpReveals");
+    const updateResult = await coll.updateMany(
+      { poolId, commitmentHash: { $in: commitmentHashes } },
+      { $set: { executed: true } },
+    );
+    console.log("  Marked", updateResult.modifiedCount, "commitment(s) as executed");
+    if (clearAfter) {
+      const deleteResult = await coll.deleteMany({ poolId, commitmentHash: { $in: commitmentHashes } });
+      console.log("  Deleted", deleteResult.deletedCount, "pending reveal(s) (--clear)");
     }
+    await client3.close();
+  } catch (e) {
+    console.warn("  Could not update/clear pending:", e.message);
   }
 
   console.log("\n" + "=".repeat(60));

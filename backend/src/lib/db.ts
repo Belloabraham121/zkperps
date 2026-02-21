@@ -43,6 +43,7 @@ export async function connectDB(): Promise<Db> {
     await db.collection<UserWallet>("userWallets").createIndex({ privyUserId: 1 }, { unique: true });
     await db.collection<UserWallet>("userWallets").createIndex({ walletAddress: 1 });
     await db.collection<PendingPerpReveal>("pendingPerpReveals").createIndex({ poolId: 1, createdAt: 1 });
+    await db.collection<PendingPerpReveal>("pendingPerpReveals").createIndex({ poolId: 1, executed: 1, createdAt: 1 });
     await db.collection<PerpOrder>("perpOrders").createIndex({ commitmentHash: 1 }, { unique: true });
     await db.collection<PerpOrder>("perpOrders").createIndex({ privyUserId: 1, status: 1, createdAt: -1 });
     await db.collection<PerpOrder>("perpOrders").createIndex({ walletAddress: 1, status: 1, createdAt: -1 });
@@ -83,10 +84,13 @@ export function getUserWalletsCollection(): Collection<UserWallet> {
 /**
  * Pending perp reveal: commitment hash submitted via our API (commit + reveal).
  * Used to know which hashes can be passed to execute-batch.
+ * executed: false until batch has been executed (backend or script); then true before cleanup.
  */
 export interface PendingPerpReveal {
   poolId: string; // hex poolId
   commitmentHash: string;
+  /** false = not yet executed, true = executed (set by backend or execute-perp-batch script) */
+  executed: boolean;
   createdAt: Date;
 }
 

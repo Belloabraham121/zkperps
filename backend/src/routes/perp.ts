@@ -438,6 +438,7 @@ perpRouter.post("/reveal", async (req: AuthRequest, res: Response): Promise<void
       await getPendingPerpRevealsCollection().insertOne({
         poolId,
         commitmentHash,
+        executed: false,
         createdAt: now,
       });
       // Save order so frontend can show open orders and we can create trade record when batch executes
@@ -523,7 +524,7 @@ perpRouter.post("/execute-batch", async (req: AuthRequest, res: Response): Promi
       try {
         const poolId = computePoolId(poolKey);
         const docs = await getPendingPerpRevealsCollection()
-          .find({ poolId })
+          .find({ poolId, executed: { $ne: true } })
           .sort({ createdAt: 1 })
           .toArray();
         commitmentHashes = docs.map((d) => d.commitmentHash);
@@ -624,8 +625,12 @@ perpRouter.post("/execute-batch", async (req: AuthRequest, res: Response): Promi
       console.warn("[Perp] Could not parse PositionClosed events from receipt:", receiptErr);
     }
 
-    // Remove executed commitment hashes from pending; mark orders executed; create trade history
+    // Mark commitments as executed, then remove from pending; mark orders executed; create trade history
     try {
+      await getPendingPerpRevealsCollection().updateMany(
+        { poolId, commitmentHash: { $in: commitmentHashes } },
+        { $set: { executed: true } },
+      );
       await getPendingPerpRevealsCollection().deleteMany({
         poolId,
         commitmentHash: { $in: commitmentHashes },
@@ -724,7 +729,7 @@ perpRouter.post("/execute", async (req: AuthRequest, res: Response): Promise<voi
     let commitmentHashes: string[] = [];
     try {
       const docs = await getPendingPerpRevealsCollection()
-        .find({ poolId })
+        .find({ poolId, executed: { $ne: true } })
         .sort({ createdAt: 1 })
         .toArray();
       commitmentHashes = docs.map((d) => d.commitmentHash);
@@ -868,6 +873,10 @@ perpRouter.post("/execute", async (req: AuthRequest, res: Response): Promise<voi
     }
 
     try {
+      await getPendingPerpRevealsCollection().updateMany(
+        { poolId, commitmentHash: { $in: commitmentHashes } },
+        { $set: { executed: true } },
+      );
       await getPendingPerpRevealsCollection().deleteMany({
         poolId,
         commitmentHash: { $in: commitmentHashes },
@@ -957,7 +966,7 @@ perpRouter.get("/pending-batch", async (_req: AuthRequest, res: Response): Promi
     let commitmentHashes: string[] = [];
     try {
       const docs = await getPendingPerpRevealsCollection()
-        .find({ poolId })
+        .find({ poolId, executed: { $ne: true } })
         .sort({ createdAt: 1 })
         .toArray();
       commitmentHashes = docs.map((d) => d.commitmentHash);

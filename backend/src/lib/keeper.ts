@@ -60,7 +60,7 @@ export async function tryExecuteBatchIfReady(
     let commitmentHashes: string[] = [];
     try {
       const docs = await getPendingPerpRevealsCollection()
-        .find({ poolId })
+        .find({ poolId, executed: { $ne: true } })
         .sort({ createdAt: 1 })
         .toArray();
       commitmentHashes = docs.map((d) => d.commitmentHash);
@@ -251,6 +251,10 @@ export async function tryExecuteBatchIfReady(
       data,
     });
 
+    await getPendingPerpRevealsCollection().updateMany(
+      { poolId, commitmentHash: { $in: commitmentHashes } },
+      { $set: { executed: true } },
+    );
     await getPendingPerpRevealsCollection().deleteMany({
       poolId,
       commitmentHash: { $in: commitmentHashes },

@@ -8,14 +8,17 @@
  * 3. Submit perp commitment (hook.submitPerpCommitment)
  * 4. Submit perp reveal (hook.submitPerpReveal)
  *
- * Batch execution is done separately: run execute-perp-batch-from-mongo.js
- * to read pending commits from MongoDB and call revealAndBatchExecutePerps.
+ * When MONGODB_URI is set, each commitment hash is written to MongoDB (pendingPerpReveals)
+ * as soon as it is submitted on-chain. Other scripts (e.g. execute-perp-batch-from-mongo.js)
+ * or the backend can then trigger batch execution; this script does nothing else for that.
  *
  * Usage:
  *   node test-perp-e2e.js
  *
  * Env:
  *   PRIVATE_KEY, RPC_URL (or ARBITRUM_SEPOLIA_RPC_URL)
+ *   MONGODB_URI (optional) — if set, commitment hashes are inserted into pendingPerpReveals
+ *   MONGODB_DB_NAME (optional, default zkperps)
  *   HOOK_ADDRESS, PERP_MANAGER_ADDRESS, MOCK_USDC, MOCK_USDT (optional)
  *   On Arbitrum Sepolia (chainId 421614) the script uses DEPLOYED addresses.
  *   MARKET_ID (e.g. 0x0000000000000000000000000000000000000001 for ETH)
@@ -30,6 +33,7 @@ const envPaths = [
   path.join(__dirname, ".env"),
   path.join(__dirname, "../.env"),
   path.join(__dirname, "../../.env"),
+  path.join(__dirname, "../../backend/.env"),
 ];
 
 for (const envPath of envPaths) {
@@ -57,6 +61,8 @@ const RPC_URL =
   process.env.ARBITRUM_SEPOLIA_RPC_URL ||
   process.env.BASE_SEPOLIA_RPC_URL;
 const PRIVATE_KEY = process.env.PRIVATE_KEY;
+const MONGODB_URI = process.env.MONGODB_URI;
+const MONGODB_DB_NAME = process.env.MONGODB_DB_NAME || "zkperps";
 const HOOK_ADDRESS = process.env.HOOK_ADDRESS || DEPLOYED.PRIV_BATCH_HOOK;
 const PERP_MANAGER_ADDRESS =
   process.env.PERP_MANAGER_ADDRESS || DEPLOYED.PERP_POSITION_MANAGER;
@@ -316,7 +322,7 @@ async function main() {
     "(18d)",
   );
 
-  // 2. Build two intents (contract requires MIN_COMMITMENTS >= 2)
+  // 2. Build two intents (batch needs MIN_COMMITMENTS >= 2; both must be revealed on-chain)
   console.log("\n--- 2. Build PerpIntents and commitment hashes ---");
   const collateralWei = (size * ethers.parseEther("2800")) / leverage;
   const intent1 = buildPerpIntent(
@@ -343,42 +349,69 @@ async function main() {
   );
   const hash1 = await hook.computePerpCommitmentHash(intent1);
   const hash2 = await hook.computePerpCommitmentHash(intent2);
-  const commitmentHashes = [hash1, hash2];
   console.log("  Hash1:", hash1);
   console.log("  Hash2:", hash2);
 
-  // 3. Submit commitments
-  console.log("\n--- 3. Submit perp commitments ---");
+  const enc = (i) => [ i.user, i.market, i.size, i.isLong, i.isOpen, i.collateral, i.leverage, i.nonce, i.deadline ];
+
+  // 3. Submit commitment 1 + reveal 1 + MongoDB
+  console.log("\n--- 3. Submit perp commitment 1 ---");
   const commit1Tx = await hook.submitPerpCommitment(poolKey, hash1);
   await commit1Tx.wait();
   console.log("  Commit 1:", commit1Tx.hash);
-  const commit2Tx = await hook.submitPerpCommitment(poolKey, hash2);
-  await commit2Tx.wait();
-  console.log("  Commit 2:", commit2Tx.hash);
-
-  // 4. Submit reveals
-  console.log("\n--- 4. Submit perp reveals ---");
-  const enc = (i) => [
-    i.user,
-    i.market,
-    i.size,
-    i.isLong,
-    i.isOpen,
-    i.collateral,
-    i.leverage,
-    i.nonce,
-    i.deadline,
-  ];
   const reveal1Tx = await hook.submitPerpReveal(poolKey, enc(intent1));
   await reveal1Tx.wait();
   console.log("  Reveal 1:", reveal1Tx.hash);
+  if (MONGODB_URI) {
+    try {
+      const { MongoClient } = require("mongodb");
+      const client = new MongoClient(MONGODB_URI);
+      await client.connect();
+      await client.db(MONGODB_DB_NAME).collection("pendingPerpReveals").insertOne({
+        poolId,
+        commitmentHash: hash1,
+        executed: false,
+        createdAt: new Date(),
+      });
+      await client.close();
+      console.log("  Inserted hash1 into MongoDB");
+    } catch (e) {
+      console.warn("  MongoDB insert hash1 failed (non-fatal):", e.message);
+    }
+  }
+
+  // 4. Submit commitment 2 + reveal 2 + MongoDB
+  console.log("\n--- 4. Submit perp commitment 2 ---");
+  const commit2Tx = await hook.submitPerpCommitment(poolKey, hash2);
+  await commit2Tx.wait();
+  console.log("  Commit 2:", commit2Tx.hash);
   const reveal2Tx = await hook.submitPerpReveal(poolKey, enc(intent2));
   await reveal2Tx.wait();
   console.log("  Reveal 2:", reveal2Tx.hash);
+  if (MONGODB_URI) {
+    try {
+      const { MongoClient } = require("mongodb");
+      const client = new MongoClient(MONGODB_URI);
+      await client.connect();
+      await client.db(MONGODB_DB_NAME).collection("pendingPerpReveals").insertOne({
+        poolId,
+        commitmentHash: hash2,
+        executed: false,
+        createdAt: new Date(),
+      });
+      await client.close();
+      console.log("  Inserted hash2 into MongoDB");
+    } catch (e) {
+      console.warn("  MongoDB insert hash2 failed (non-fatal):", e.message);
+    }
+  }
+
+  if (!MONGODB_URI) {
+    console.log("\n  (Set MONGODB_URI to write commitment hashes to MongoDB when committing; other scripts can then trigger the batch.)");
+  }
 
   console.log("\n" + "=".repeat(60));
-  console.log("Commit + reveal done. To execute the batch using commits from MongoDB, run:");
-  console.log("  node execute-perp-batch-from-mongo.js");
+  console.log("Commit + reveal done. If MONGODB_URI was set, hashes are already in MongoDB; run execute-perp-batch-from-mongo.js to trigger the batch.");
   console.log("=".repeat(60));
 }
 
