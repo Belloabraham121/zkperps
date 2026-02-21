@@ -20,29 +20,20 @@ import { config } from "../config.js";
 const caip2 = `eip155:${config.chainId}`;
 
 /**
- * Read the authorization private key from file and convert to the format Privy expects:
- * base64-encoded PKCS8 DER with no PEM headers/footers.
+ * Normalize PEM string from env (e.g. newlines stored as literal \n) and convert to
+ * the format Privy expects: base64-encoded PKCS8 DER with no PEM headers/footers.
  */
-function getAuthorizationPrivateKey(): string {
-  const path = config.privy.authorizationPrivateKeyPath;
-  if (!path) {
-    throw new Error(
-      "AUTHORIZATION_PRIVATE_KEY_PATH must be set to send transactions",
-    );
+function pemToPkcs8Base64(pem: string): string {
+  const trimmed = pem.trim();
+  if (!trimmed) {
+    throw new Error("Authorization private key is empty");
   }
-  const pem = readFileSync(path, "utf8").trim();
-  if (!pem) {
-    throw new Error("Authorization private key file is empty");
-  }
-
   // If already base64-only (no PEM headers), assume it's already PKCS8 base64
-  if (!pem.includes("-----BEGIN")) {
-    return pem;
+  if (!trimmed.includes("-----BEGIN")) {
+    return trimmed;
   }
-
-  // Convert PEM (EC PRIVATE KEY or PRIVATE KEY) to PKCS8 DER, then base64
   try {
-    const key = createPrivateKey({ key: pem, format: "pem" });
+    const key = createPrivateKey({ key: trimmed, format: "pem" });
     const pkcs8Der = key.export({ type: "pkcs8", format: "der" });
     if (!Buffer.isBuffer(pkcs8Der)) {
       throw new Error("Key export did not return a Buffer");
@@ -51,9 +42,35 @@ function getAuthorizationPrivateKey(): string {
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     throw new Error(
-      `Failed to convert authorization private key to PKCS8: ${msg}. Ensure the file is a valid P-256 EC private key (PEM).`,
+      `Failed to convert authorization private key to PKCS8: ${msg}. Ensure the key is a valid P-256 EC private key (PEM).`,
     );
   }
+}
+
+/**
+ * Read the authorization private key from env (AUTHORIZATION_PRIVATE_KEY) or file path
+ * and convert to the format Privy expects: base64-encoded PKCS8 DER.
+ * For Vercel/serverless, set AUTHORIZATION_PRIVATE_KEY to the PEM content (newlines as \n).
+ */
+function getAuthorizationPrivateKey(): string {
+  const fromEnv = config.privy.authorizationPrivateKey;
+  if (fromEnv) {
+    // Allow newlines stored as literal \n in env (e.g. single-line paste)
+    const pem = fromEnv.replace(/\\n/g, "\n").trim();
+    return pemToPkcs8Base64(pem);
+  }
+
+  const path = config.privy.authorizationPrivateKeyPath;
+  if (!path) {
+    throw new Error(
+      "Set AUTHORIZATION_PRIVATE_KEY (PEM string) or AUTHORIZATION_PRIVATE_KEY_PATH to send transactions",
+    );
+  }
+  const pem = readFileSync(path, "utf8").trim();
+  if (!pem) {
+    throw new Error("Authorization private key file is empty");
+  }
+  return pemToPkcs8Base64(pem);
 }
 
 export interface SendTransactionParams {

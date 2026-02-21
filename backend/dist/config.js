@@ -8,6 +8,8 @@ export const config = {
         appId: process.env.PRIVY_APP_ID ?? "",
         appSecret: process.env.PRIVY_APP_SECRET ?? "",
         keyQuorumId: process.env.PRIVY_KEY_QUORUM_ID ?? "",
+        /** PEM string from env (for Vercel/serverless). Use this or AUTHORIZATION_PRIVATE_KEY_PATH. */
+        authorizationPrivateKey: process.env.AUTHORIZATION_PRIVATE_KEY ?? "",
         authorizationPrivateKeyPath: process.env.AUTHORIZATION_PRIVATE_KEY_PATH ?? "",
     },
     chainId: parseInt(process.env.CHAIN_ID ?? "421614", 10),

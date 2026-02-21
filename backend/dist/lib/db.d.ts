@@ -25,10 +25,13 @@ export declare function getUserWalletsCollection(): Collection<UserWallet>;
 /**
  * Pending perp reveal: commitment hash submitted via our API (commit + reveal).
  * Used to know which hashes can be passed to execute-batch.
+ * executed: false until batch has been executed (backend or script); then true before cleanup.
  */
 export interface PendingPerpReveal {
     poolId: string;
     commitmentHash: string;
+    /** false = not yet executed, true = executed (set by backend or execute-perp-batch script) */
+    executed: boolean;
     createdAt: Date;
 }
 /**

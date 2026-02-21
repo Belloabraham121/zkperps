@@ -29,6 +29,7 @@ export async function connectDB() {
         await db.collection("userWallets").createIndex({ privyUserId: 1 }, { unique: true });
         await db.collection("userWallets").createIndex({ walletAddress: 1 });
         await db.collection("pendingPerpReveals").createIndex({ poolId: 1, createdAt: 1 });
+        await db.collection("pendingPerpReveals").createIndex({ poolId: 1, executed: 1, createdAt: 1 });
         await db.collection("perpOrders").createIndex({ commitmentHash: 1 }, { unique: true });
         await db.collection("perpOrders").createIndex({ privyUserId: 1, status: 1, createdAt: -1 });
         await db.collection("perpOrders").createIndex({ walletAddress: 1, status: 1, createdAt: -1 });

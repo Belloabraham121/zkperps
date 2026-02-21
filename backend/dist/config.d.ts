@@ -8,6 +8,8 @@ export declare const config: {
         appId: string;
         appSecret: string;
         keyQuorumId: string;
+        /** PEM string from env (for Vercel/serverless). Use this or AUTHORIZATION_PRIVATE_KEY_PATH. */
+        authorizationPrivateKey: string;
         authorizationPrivateKeyPath: string;
     };
     chainId: number;

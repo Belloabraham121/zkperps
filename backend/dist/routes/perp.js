@@ -24,7 +24,6 @@ import { buildPoolKey, computePoolId, encodeSubmitPerpCommitment, encodeSubmitPe
 import { computePerpCommitmentHash, getPosition, getUnrealizedPnL, getPositionClosedFromReceipt, getTotalCollateral, getAvailableMargin, getBatchState, getBatchInterval, getTokenBalance, getPublicClient, getPoolSlot0SqrtPriceX96, getPoolLiquidity, } from "../lib/contract-reader.js";
 import { getPendingPerpRevealsCollection, getPerpOrdersCollection, getPerpTradesCollection, } from "../lib/db.js";
 import { config } from "../config.js";
-import { tryExecuteBatchIfReady } from "../lib/keeper.js";
 /** Normalize intent fields that may be string to bigint for contract calls */
 function intentToBigint(intent) {
     const big = (v) => v === undefined ? 0n : typeof v === "bigint" ? v : BigInt(String(v));
@@ -342,6 +341,7 @@ perpRouter.post("/reveal", async (req, res) => {
             await getPendingPerpRevealsCollection().insertOne({
                 poolId,
                 commitmentHash,
+                executed: false,
                 createdAt: now,
             });
             // Save order so frontend can show open orders and we can create trade record when batch executes
@@ -368,8 +368,12 @@ perpRouter.post("/reveal", async (req, res) => {
             // Reveal already succeeded on-chain; tracking is best-effort (e.g. no MongoDB or duplicate commitmentHash)
             console.warn("[Perp] Could not store pending reveal/order for batch:", dbErr);
         }
-        // Auto-execute batch when ready (2+ pending and batch interval passed). Fire-and-forget so response returns immediately.
-        tryExecuteBatchIfReady({ walletId: walletSetup.walletId, walletAddress: walletSetup.walletAddress }, "post-reveal", poolKey).catch((err) => console.warn("[Perp] Post-reveal auto-execute check failed:", err));
+        // Auto-execute batch when ready (2+ pending and batch interval passed). Commented out so batches only run on explicit POST /api/perp/execute.
+        // tryExecuteBatchIfReady(
+        //   { walletId: walletSetup.walletId!, walletAddress: walletSetup.walletAddress },
+        //   "post-reveal",
+        //   poolKey,
+        // ).catch((err) => console.warn("[Perp] Post-reveal auto-execute check failed:", err));
         res.json({ hash: result.hash });
     }
     catch (e) {
@@ -410,7 +414,7 @@ perpRouter.post("/execute-batch", async (req, res) => {
             try {
                 const poolId = computePoolId(poolKey);
                 const docs = await getPendingPerpRevealsCollection()
-                    .find({ poolId })
+                    .find({ poolId, executed: { $ne: true } })
                     .sort({ createdAt: 1 })
                     .toArray();
                 commitmentHashes = docs.map((d) => d.commitmentHash);
@@ -496,8 +500,9 @@ perpRouter.post("/execute-batch", async (req, res) => {
         catch (receiptErr) {
             console.warn("[Perp] Could not parse PositionClosed events from receipt:", receiptErr);
         }
-        // Remove executed commitment hashes from pending; mark orders executed; create trade history
+        // Mark commitments as executed, then remove from pending; mark orders executed; create trade history
         try {
+            await getPendingPerpRevealsCollection().updateMany({ poolId, commitmentHash: { $in: commitmentHashes } }, { $set: { executed: true } });
             await getPendingPerpRevealsCollection().deleteMany({
                 poolId,
                 commitmentHash: { $in: commitmentHashes },
@@ -581,7 +586,7 @@ perpRouter.post("/execute", async (req, res) => {
         let commitmentHashes = [];
         try {
             const docs = await getPendingPerpRevealsCollection()
-                .find({ poolId })
+                .find({ poolId, executed: { $ne: true } })
                 .sort({ createdAt: 1 })
                 .toArray();
             commitmentHashes = docs.map((d) => d.commitmentHash);
@@ -711,6 +716,7 @@ perpRouter.post("/execute", async (req, res) => {
             console.warn("[Perp] Could not parse PositionClosed events from receipt:", receiptErr);
         }
         try {
+            await getPendingPerpRevealsCollection().updateMany({ poolId, commitmentHash: { $in: commitmentHashes } }, { $set: { executed: true } });
             await getPendingPerpRevealsCollection().deleteMany({
                 poolId,
                 commitmentHash: { $in: commitmentHashes },
@@ -786,7 +792,7 @@ perpRouter.get("/pending-batch", async (_req, res) => {
         let commitmentHashes = [];
         try {
             const docs = await getPendingPerpRevealsCollection()
-                .find({ poolId })
+                .find({ poolId, executed: { $ne: true } })
                 .sort({ createdAt: 1 })
                 .toArray();
             commitmentHashes = docs.map((d) => d.commitmentHash);
