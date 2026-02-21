@@ -17,6 +17,16 @@ const ERC20_ABI = [
         ],
         outputs: [{ type: "bool" }],
     },
+    {
+        name: "transfer",
+        type: "function",
+        stateMutability: "nonpayable",
+        inputs: [
+            { name: "to", type: "address" },
+            { name: "amount", type: "uint256" },
+        ],
+        outputs: [{ type: "bool" }],
+    },
 ];
 const PERP_MANAGER_ABI = [
     {
@@ -27,6 +37,13 @@ const PERP_MANAGER_ABI = [
             { name: "user", type: "address" },
             { name: "amount", type: "uint256" },
         ],
+        outputs: [],
+    },
+    {
+        name: "withdrawCollateral",
+        type: "function",
+        stateMutability: "nonpayable",
+        inputs: [{ name: "amount", type: "uint256" }],
         outputs: [],
     },
 ];
@@ -148,6 +165,17 @@ export function encodeUsdcApprove(spender, amount) {
     });
 }
 /**
+ * Encode ERC20 transfer(to, amount) for use in sendTransaction.
+ * Used to fund the Hook with quote so it can settle the perp swap (see scripts/zk/test-perp-e2e.js step 5.6).
+ */
+export function encodeErc20Transfer(to, amount) {
+    return encodeFunctionData({
+        abi: ERC20_ABI,
+        functionName: "transfer",
+        args: [to, amount],
+    });
+}
+/**
  * Encode PerpPositionManager.depositCollateral(user, amount).
  */
 export function encodeDepositCollateral(user, amount) {
@@ -155,6 +183,17 @@ export function encodeDepositCollateral(user, amount) {
         abi: PERP_MANAGER_ABI,
         functionName: "depositCollateral",
         args: [user, amount],
+    });
+}
+/**
+ * Encode PerpPositionManager.withdrawCollateral(amount).
+ * Amount in token decimals (e.g. 6 for USDC); contract converts to 18d internally.
+ */
+export function encodeWithdrawCollateral(amount) {
+    return encodeFunctionData({
+        abi: PERP_MANAGER_ABI,
+        functionName: "withdrawCollateral",
+        args: [amount],
     });
 }
 /**

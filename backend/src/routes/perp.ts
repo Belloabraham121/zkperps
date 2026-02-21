@@ -27,6 +27,7 @@ import {
   encodeSubmitPerpReveal,
   encodeRevealAndBatchExecutePerps,
   getDepositCollateralCalldata,
+  encodeWithdrawCollateral,
   encodeErc20Transfer,
   type PoolKey,
   type PerpIntent,
@@ -35,6 +36,8 @@ import {
 import {
   computePerpCommitmentHash,
   getPosition,
+  getUnrealizedPnL,
+  getPositionClosedFromReceipt,
   getTotalCollateral,
   getAvailableMargin,
   getBatchState,
@@ -49,6 +52,7 @@ import {
   getPendingPerpRevealsCollection,
   getPerpOrdersCollection,
   getPerpTradesCollection,
+  type OrderStatus,
 } from "../lib/db.js";
 import { config } from "../config.js";
 import { tryExecuteBatchIfReady } from "../lib/keeper.js";
@@ -231,6 +235,67 @@ perpRouter.post("/deposit", async (req: AuthRequest, res: Response): Promise<voi
 });
 
 /**
+ * POST /api/perp/withdraw
+ * Body: { amount: number } — amount in USDC (e.g. 100.50)
+ *
+ * Withdraws collateral from PerpPositionManager back to the user's wallet.
+ * Reverts if amount is 0 or available margin is less than amount.
+ *
+ * @returns { hash: string } Transaction hash
+ */
+perpRouter.post("/withdraw", async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    if (!req.user?.sub) {
+      res.status(401).json({ error: "Not authenticated" });
+      return;
+    }
+
+    const walletSetup = await verifyWalletSetup(req.user.sub);
+    if (!walletSetup.isSetup || !walletSetup.walletAddress) {
+      res.status(400).json({
+        error: walletSetup.error || "Wallet not properly set up",
+        instructions: "Call POST /api/auth/link with walletAddress and walletId, then call addSigners() with the returned signerId.",
+      });
+      return;
+    }
+
+    const { amount } = req.body as { amount?: string | number };
+    const amountNum = amount !== undefined ? Number(amount) : NaN;
+    if (Number.isNaN(amountNum) || amountNum <= 0) {
+      res.status(400).json({ error: "amount is required and must be a positive number (USDC)" });
+      return;
+    }
+
+    const amountRaw = BigInt(Math.floor(amountNum * 10 ** USDC_DECIMALS));
+    const userAddress = walletSetup.walletAddress as `0x${string}`;
+
+    const availableMargin = await getAvailableMargin(userAddress);
+    const amount18 = amountRaw * BigInt(10 ** (18 - USDC_DECIMALS));
+    if (availableMargin < amount18) {
+      const availableFormatted = Number(availableMargin) / 1e18;
+      res.status(400).json({
+        error: "Insufficient available margin to withdraw.",
+        availableMargin: availableFormatted,
+        requestedUsdc: amountNum,
+      });
+      return;
+    }
+
+    const data = encodeWithdrawCollateral(amountRaw);
+    const result = await sendTransactionAsUser(walletSetup.walletId!, {
+      to: contractAddresses.perpPositionManager,
+      data,
+    });
+
+    res.json({ hash: result.hash });
+  } catch (e) {
+    const message = e instanceof Error ? e.message : "Withdraw failed";
+    console.error("[Perp] Withdraw error:", message);
+    res.status(500).json({ error: message });
+  }
+});
+
+/**
  * POST /api/perp/commit
  * Body: { poolKey?: PoolKey, commitmentHash: string }
  * 
@@ -399,12 +464,12 @@ perpRouter.post("/reveal", async (req: AuthRequest, res: Response): Promise<void
       console.warn("[Perp] Could not store pending reveal/order for batch:", dbErr);
     }
 
-    // Auto-execute batch when ready (2+ pending and batch interval passed). Fire-and-forget so response returns immediately.
-    tryExecuteBatchIfReady(
-      { walletId: walletSetup.walletId!, walletAddress: walletSetup.walletAddress },
-      "post-reveal",
-      poolKey,
-    ).catch((err) => console.warn("[Perp] Post-reveal auto-execute check failed:", err));
+    // Auto-execute batch when ready (2+ pending and batch interval passed). Commented out so batches only run on explicit POST /api/perp/execute.
+    // tryExecuteBatchIfReady(
+    //   { walletId: walletSetup.walletId!, walletAddress: walletSetup.walletAddress },
+    //   "post-reveal",
+    //   poolKey,
+    // ).catch((err) => console.warn("[Perp] Post-reveal auto-execute check failed:", err));
 
     res.json({ hash: result.hash });
   } catch (e) {
@@ -552,6 +617,13 @@ perpRouter.post("/execute-batch", async (req: AuthRequest, res: Response): Promi
     const poolId = computePoolId(poolKey);
     const executedAt = new Date();
 
+    let positionClosedEvents: Awaited<ReturnType<typeof getPositionClosedFromReceipt>> = [];
+    try {
+      positionClosedEvents = await getPositionClosedFromReceipt(result.hash as `0x${string}`);
+    } catch (receiptErr) {
+      console.warn("[Perp] Could not parse PositionClosed events from receipt:", receiptErr);
+    }
+
     // Remove executed commitment hashes from pending; mark orders executed; create trade history
     try {
       await getPendingPerpRevealsCollection().deleteMany({
@@ -565,6 +637,7 @@ perpRouter.post("/execute-batch", async (req: AuthRequest, res: Response): Promi
         .find({ commitmentHash: { $in: commitmentHashes }, status: "pending" })
         .toArray();
 
+      let closeIndex = 0;
       for (const order of executedOrders) {
         await ordersColl.updateOne(
           { commitmentHash: order.commitmentHash },
@@ -577,6 +650,15 @@ perpRouter.post("/execute-batch", async (req: AuthRequest, res: Response): Promi
             },
           },
         );
+        const isClose = !order.isOpen;
+        const ev = isClose && closeIndex < positionClosedEvents.length ? positionClosedEvents[closeIndex++] : null;
+        const realisedPnl = ev != null ? Number(ev.realizedPnL) / 1e18 : null;
+        const notionalClosed =
+          ev != null
+            ? (Number(ev.sizeClosed >= 0n ? ev.sizeClosed : -ev.sizeClosed) * Number(ev.markPrice)) / 1e18
+            : 0;
+        const realisedPnlPct =
+          realisedPnl != null && notionalClosed > 0 ? (realisedPnl / notionalClosed) * 100 : null;
         await tradesColl.insertOne({
           privyUserId: order.privyUserId,
           walletAddress: order.walletAddress,
@@ -587,6 +669,8 @@ perpRouter.post("/execute-batch", async (req: AuthRequest, res: Response): Promi
           collateral: order.collateral,
           leverage: order.leverage,
           entryPrice: null,
+          realisedPnl: realisedPnl ?? null,
+          realisedPnlPct: realisedPnlPct ?? null,
           txHash: result.hash,
           executedAt,
           poolId: order.poolId,
@@ -776,6 +860,13 @@ perpRouter.post("/execute", async (req: AuthRequest, res: Response): Promise<voi
     });
 
     const executedAt = new Date();
+    let positionClosedEventsExecute: Awaited<ReturnType<typeof getPositionClosedFromReceipt>> = [];
+    try {
+      positionClosedEventsExecute = await getPositionClosedFromReceipt(result.hash as `0x${string}`);
+    } catch (receiptErr) {
+      console.warn("[Perp] Could not parse PositionClosed events from receipt:", receiptErr);
+    }
+
     try {
       await getPendingPerpRevealsCollection().deleteMany({
         poolId,
@@ -788,6 +879,7 @@ perpRouter.post("/execute", async (req: AuthRequest, res: Response): Promise<voi
         .find({ commitmentHash: { $in: commitmentHashes }, status: "pending" })
         .toArray();
 
+      let closeIndexExecute = 0;
       for (const order of executedOrders) {
         await ordersColl.updateOne(
           { commitmentHash: order.commitmentHash },
@@ -800,6 +892,18 @@ perpRouter.post("/execute", async (req: AuthRequest, res: Response): Promise<voi
             },
           },
         );
+        const isClose = !order.isOpen;
+        const ev =
+          isClose && closeIndexExecute < positionClosedEventsExecute.length
+            ? positionClosedEventsExecute[closeIndexExecute++]
+            : null;
+        const realisedPnl = ev != null ? Number(ev.realizedPnL) / 1e18 : null;
+        const notionalClosed =
+          ev != null
+            ? (Number(ev.sizeClosed >= 0n ? ev.sizeClosed : -ev.sizeClosed) * Number(ev.markPrice)) / 1e18
+            : 0;
+        const realisedPnlPct =
+          realisedPnl != null && notionalClosed > 0 ? (realisedPnl / notionalClosed) * 100 : null;
         await tradesColl.insertOne({
           privyUserId: order.privyUserId,
           walletAddress: order.walletAddress,
@@ -810,6 +914,8 @@ perpRouter.post("/execute", async (req: AuthRequest, res: Response): Promise<voi
           collateral: order.collateral,
           leverage: order.leverage,
           entryPrice: null,
+          realisedPnl: realisedPnl ?? null,
+          realisedPnlPct: realisedPnlPct ?? null,
           txHash: result.hash,
           executedAt,
           poolId: order.poolId,
@@ -934,11 +1040,17 @@ perpRouter.get("/position", async (req: AuthRequest, res: Response): Promise<voi
 
     const marketId = (req.query.marketId as string) || contractAddresses.marketId;
 
-    // Get position from contract
-    const position = await getPosition(
-      walletSetup.walletAddress as `0x${string}`,
-      marketId as `0x${string}`,
-    );
+    // Get position and unrealized PnL from contract
+    const [position, unrealizedPnl] = await Promise.all([
+      getPosition(
+        walletSetup.walletAddress as `0x${string}`,
+        marketId as `0x${string}`,
+      ),
+      getUnrealizedPnL(
+        walletSetup.walletAddress as `0x${string}`,
+        marketId as `0x${string}`,
+      ),
+    ]);
 
     res.json({
       marketId,
@@ -949,6 +1061,7 @@ perpRouter.get("/position", async (req: AuthRequest, res: Response): Promise<voi
         leverage: position.leverage.toString(),
         lastFundingPaid: position.lastFundingPaid.toString(),
         entryCumulativeFunding: position.entryCumulativeFunding.toString(),
+        unrealizedPnl: unrealizedPnl.toString(),
       },
     });
   } catch (e) {
@@ -1104,10 +1217,9 @@ perpRouter.get("/orders", async (req: AuthRequest, res: Response): Promise<void>
     }
 
     const status = (req.query.status as string) || "pending";
-    const validStatuses = ["pending", "executed", "cancelled", "all"];
-    const filter: { privyUserId: string; status?: string } = { privyUserId: req.user.sub };
-    if (status !== "all" && validStatuses.includes(status)) {
-      filter.status = status;
+    const filter: { privyUserId: string; status?: OrderStatus } = { privyUserId: req.user.sub };
+    if (status !== "all" && (status === "pending" || status === "executed" || status === "cancelled")) {
+      filter.status = status as OrderStatus;
     }
 
     const orders = await getPerpOrdersCollection()

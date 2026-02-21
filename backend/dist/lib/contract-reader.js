@@ -2,20 +2,19 @@
  * Contract state reader using viem for reading on-chain data.
  * Used for querying positions, collateral, and other view functions.
  */
-import { createPublicClient, http } from "viem";
+import { createPublicClient, http, encodePacked, keccak256, parseEventLogs } from "viem";
 import { arbitrumSepolia } from "viem/chains";
 import { config } from "../config.js";
 const { contracts: c, rpcUrl } = config;
 // Note: chainId from config is ignored - always uses Arbitrum Sepolia (421614)
 // Create public client for reading contract state
 // Always uses Arbitrum Sepolia (421614) - hardcoded default
-function getPublicClient() {
+export function getPublicClient() {
     if (!rpcUrl) {
         throw new Error("RPC_URL must be set to read contract state");
     }
-    // Always use Arbitrum Sepolia - hardcoded default
     return createPublicClient({
-        chain: arbitrumSepolia, // Always Arbitrum Sepolia (421614)
+        chain: arbitrumSepolia,
         transport: http(rpcUrl, {
             timeout: 15_000,
             retryCount: 3,
@@ -54,6 +53,30 @@ const PERP_MANAGER_ABI = [
         stateMutability: "view",
         inputs: [{ name: "user", type: "address" }],
         outputs: [{ type: "uint256" }],
+    },
+    {
+        name: "getUnrealizedPnL",
+        type: "function",
+        stateMutability: "view",
+        inputs: [
+            { name: "user", type: "address" },
+            { name: "market", type: "address" },
+        ],
+        outputs: [{ type: "int256" }],
+    },
+];
+/** ABI for PositionClosed event (for decoding receipt logs). */
+const POSITION_CLOSED_EVENT_ABI = [
+    {
+        type: "event",
+        name: "PositionClosed",
+        inputs: [
+            { name: "user", type: "address", indexed: true },
+            { name: "market", type: "address", indexed: true },
+            { name: "sizeClosed", type: "int256", indexed: false },
+            { name: "markPrice", type: "uint256", indexed: false },
+            { name: "realizedPnL", type: "int256", indexed: false },
+        ],
     },
 ];
 const HOOK_ABI = [
@@ -96,6 +119,23 @@ const HOOK_ABI = [
             { name: "lastBatchTimestamp", type: "uint256" },
             { name: "commitmentCount", type: "uint256" },
         ],
+    },
+    {
+        name: "poolManager",
+        type: "function",
+        stateMutability: "view",
+        inputs: [],
+        outputs: [{ type: "address" }],
+    },
+];
+/** Uniswap V4 PoolManager extsload(slot) for reading pool slot0 (StateLibrary.POOLS_SLOT = 6) */
+const POOL_MANAGER_EXTSLOAD_ABI = [
+    {
+        name: "extsload",
+        type: "function",
+        stateMutability: "view",
+        inputs: [{ name: "slot", type: "bytes32" }],
+        outputs: [{ type: "bytes32" }],
     },
 ];
 const ERC20_ABI = [
@@ -171,6 +211,40 @@ export async function getAvailableMargin(userAddress) {
     return result;
 }
 /**
+ * Get unrealized PnL for a user's position in a market (18 decimals, signed).
+ */
+export async function getUnrealizedPnL(userAddress, marketId) {
+    const client = getPublicClient();
+    const result = await client.readContract({
+        address: c.perpPositionManager,
+        abi: PERP_MANAGER_ABI,
+        functionName: "getUnrealizedPnL",
+        args: [userAddress, marketId],
+    });
+    return result;
+}
+/**
+ * Wait for tx receipt and parse PositionClosed events from PerpPositionManager.
+ * Returns one entry per close in execution order (for matching to close trades).
+ */
+export async function getPositionClosedFromReceipt(txHash) {
+    const client = getPublicClient();
+    const receipt = await client.waitForTransactionReceipt({ hash: txHash });
+    const logs = receipt.logs.filter((log) => log.address.toLowerCase() === c.perpPositionManager.toLowerCase());
+    const parsed = parseEventLogs({
+        abi: POSITION_CLOSED_EVENT_ABI,
+        logs,
+        eventName: "PositionClosed",
+    });
+    return parsed.map((p) => ({
+        user: p.args.user,
+        market: p.args.market,
+        sizeClosed: p.args.sizeClosed,
+        markPrice: p.args.markPrice,
+        realizedPnL: p.args.realizedPnL,
+    }));
+}
+/**
  * Compute perp commitment hash from intent (read-only call)
  */
 export async function computePerpCommitmentHash(intent) {
@@ -192,6 +266,19 @@ export async function getBatchInterval() {
         address: c.privBatchHook,
         abi: HOOK_ABI,
         functionName: "BATCH_INTERVAL",
+    });
+    return result;
+}
+/**
+ * Get the PoolManager address the Hook uses (set at deploy time).
+ * Backend POOL_MANAGER and SetupPoolLiquidity POOL_MANAGER must match this.
+ */
+export async function getHookPoolManager() {
+    const client = getPublicClient();
+    const result = await client.readContract({
+        address: c.privBatchHook,
+        abi: HOOK_ABI,
+        functionName: "poolManager",
     });
     return result;
 }
@@ -223,6 +310,46 @@ export async function getTokenBalance(tokenAddress, userAddress) {
         args: [userAddress],
     });
     return result;
+}
+const POOLS_SLOT = 6n;
+const LIQUIDITY_OFFSET = 3n;
+function getPoolStateSlot(poolId) {
+    return keccak256(encodePacked(["bytes32", "bytes32"], [poolId, `0x${POOLS_SLOT.toString(16).padStart(64, "0")}`]));
+}
+/**
+ * Get pool slot0 sqrtPriceX96 from PoolManager (Uniswap V4).
+ * StateLibrary: pools[poolId] slot = keccak256(abi.encodePacked(poolId, POOLS_SLOT)); POOLS_SLOT = 6.
+ * First word of Pool.State is slot0; bottom 160 bits = sqrtPriceX96. If 0, pool not initialized.
+ */
+export async function getPoolSlot0SqrtPriceX96(poolId) {
+    const client = getPublicClient();
+    const stateSlot = getPoolStateSlot(poolId);
+    const data = await client.readContract({
+        address: c.poolManager,
+        abi: POOL_MANAGER_EXTSLOAD_ABI,
+        functionName: "extsload",
+        args: [stateSlot],
+    });
+    const val = BigInt(data);
+    return val & BigInt("0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF");
+}
+/**
+ * Get pool in-range liquidity (Pool.State.liquidity) from PoolManager.
+ * StateLibrary: liquidity at stateSlot + LIQUIDITY_OFFSET (3); uint128.
+ * If 0, swap can revert with Panic 18 (division by zero).
+ */
+export async function getPoolLiquidity(poolId) {
+    const client = getPublicClient();
+    const stateSlot = getPoolStateSlot(poolId);
+    const liquiditySlot = `0x${(BigInt(stateSlot) + LIQUIDITY_OFFSET).toString(16).padStart(64, "0")}`;
+    const data = await client.readContract({
+        address: c.poolManager,
+        abi: POOL_MANAGER_EXTSLOAD_ABI,
+        functionName: "extsload",
+        args: [liquiditySlot],
+    });
+    const val = BigInt(data);
+    return val & BigInt("0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF");
 }
 /**
  * Get ERC-20 token allowance

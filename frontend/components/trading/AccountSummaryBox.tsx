@@ -22,6 +22,9 @@ export function AccountSummaryBox() {
   const [depositModalOpen, setDepositModalOpen] = useState(false);
   const [depositPending, setDepositPending] = useState(false);
   const [depositAmount, setDepositAmount] = useState("");
+  const [withdrawModalOpen, setWithdrawModalOpen] = useState(false);
+  const [withdrawPending, setWithdrawPending] = useState(false);
+  const [withdrawAmount, setWithdrawAmount] = useState("");
 
   const { token, isAuthenticated } = useAuth();
   const queryClient = useQueryClient();
@@ -47,10 +50,13 @@ export function AccountSummaryBox() {
     setDepositModalOpen(true);
   };
 
-  // Clear amount when modal opens
+  // Clear amount when modals open
   useEffect(() => {
     if (depositModalOpen) setDepositAmount("");
   }, [depositModalOpen]);
+  useEffect(() => {
+    if (withdrawModalOpen) setWithdrawAmount("");
+  }, [withdrawModalOpen]);
 
   const handleDepositSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -80,9 +86,44 @@ export function AccountSummaryBox() {
     }
   };
 
-  const handleWithdraw = () => {
-    // TODO: open withdraw modal – withdrawCollateral(amount) up to available margin
-    toast.info("Withdraw flow coming soon");
+  const handleWithdrawClick = () => {
+    if (!isAuthenticated || !token) {
+      toast.error("Please sign in to withdraw");
+      return;
+    }
+    setWithdrawModalOpen(true);
+  };
+
+  const handleWithdrawSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!token) return;
+    const raw = withdrawAmount.trim();
+    const num = parseFloat(raw);
+    if (raw === "" || Number.isNaN(num) || num <= 0) {
+      toast.error("Enter a valid amount (e.g. 50 for 50 USDC)");
+      return;
+    }
+    if (num > availableMargin) {
+      toast.error(`Available to withdraw: ${formatUsd(availableMargin)}`);
+      return;
+    }
+    setWithdrawPending(true);
+    try {
+      const result = await perpApi.withdrawCollateral(num, token);
+      setWithdrawModalOpen(false);
+      setWithdrawAmount("");
+      queryClient.invalidateQueries({ queryKey: ["collateral"] });
+      queryClient.invalidateQueries({ queryKey: ["balances"] });
+      toast.success("Withdraw successful", {
+        description: `Withdrew ${num} USDC. Tx: ${result.hash.slice(0, 10)}...`,
+      });
+    } catch (error) {
+      toast.error("Withdraw failed", {
+        description: error instanceof Error ? error.message : "Unknown error",
+      });
+    } finally {
+      setWithdrawPending(false);
+    }
   };
 
   const formatUsd = (n: number) =>
@@ -168,6 +209,81 @@ export function AccountSummaryBox() {
             </form>
             </div>
           </div>,
+            document.body
+        )}
+
+      {/* Withdraw modal */}
+      {withdrawModalOpen && typeof document !== "undefined" &&
+        createPortal(
+          <div
+            className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4"
+            role="dialog"
+            aria-modal="true"
+            onClick={() => !withdrawPending && setWithdrawModalOpen(false)}
+          >
+            <div
+              className="relative z-[101] w-full max-w-sm border border-[#262626] bg-[#111111] p-4 shadow-xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="mb-3 flex items-center justify-between">
+                <h3 className="text-sm font-medium text-white">
+                  Withdraw USDC
+                </h3>
+                <button
+                  type="button"
+                  onClick={() => setWithdrawModalOpen(false)}
+                  className="text-white/50 hover:text-white text-lg leading-none"
+                  disabled={withdrawPending}
+                  aria-label="Close"
+                >
+                  ×
+                </button>
+              </div>
+              <p className="mb-3 text-xs text-white/50">
+                Withdraw from your perp account to your wallet. Max: {formatUsd(availableMargin)} available.
+              </p>
+              <form onSubmit={handleWithdrawSubmit} className="flex flex-col gap-3">
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    autoComplete="off"
+                    placeholder="0.00"
+                    value={withdrawAmount}
+                    onChange={(e) => setWithdrawAmount(e.target.value)}
+                    className="w-full border border-[#262626] bg-[#1a1a1a] px-3 py-2 text-sm text-white placeholder:text-white/50 focus:outline-none focus:ring-2 focus:ring-white/30"
+                    disabled={withdrawPending}
+                    aria-label="Withdraw amount in USDC"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setWithdrawAmount(availableMargin.toFixed(2))}
+                    disabled={withdrawPending || availableMargin <= 0}
+                    className="shrink-0 border border-[#262626] bg-[#1a1a1a] px-3 py-2 text-xs font-medium text-white hover:bg-[#262626] disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    Max
+                  </button>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setWithdrawModalOpen(false)}
+                    className="flex-1 py-2 text-sm font-medium text-white/50 hover:bg-[#262626]"
+                    disabled={withdrawPending}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={withdrawPending || availableMargin <= 0}
+                    className="flex-1 bg-[#333333] py-2 text-sm font-medium text-white hover:bg-[#4a5a6d] disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {withdrawPending ? "Withdrawing..." : "Withdraw"}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>,
           document.body
         )}
 
@@ -223,8 +339,9 @@ export function AccountSummaryBox() {
           </button>
           <button
             type="button"
-            onClick={handleWithdraw}
-            className="flex-1 bg-[#1a1a1a] py-1.5 text-xs font-medium text-white hover:bg-[#262626]"
+            onClick={handleWithdrawClick}
+            disabled={availableMargin <= 0}
+            className="flex-1 bg-[#1a1a1a] py-1.5 text-xs font-medium text-white hover:bg-[#262626] disabled:opacity-50 disabled:cursor-not-allowed"
           >
             Withdraw
           </button>

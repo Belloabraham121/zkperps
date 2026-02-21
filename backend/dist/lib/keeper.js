@@ -1,20 +1,43 @@
 /**
- * Keeper: automatically executes perp batch when conditions are met.
- * Runs on an interval when KEEPER_PRIVY_USER_ID is set.
+ * Keeper: detect when a perp batch is ready and execute immediately.
+ * - Triggered after every reveal (detect then execute with current user or keeper wallet).
+ * - When KEEPER_PRIVY_USER_ID is set, also runs on an interval as fallback.
  */
+import { decodeErrorResult } from "viem";
 import { config } from "../config.js";
-import { getPendingPerpRevealsCollection } from "./db.js";
-import { buildPoolKey, computePoolId, encodeRevealAndBatchExecutePerps, contractAddresses } from "./contracts.js";
-import { getBatchState, getBatchInterval } from "./contract-reader.js";
+import { getPendingPerpRevealsCollection, getPerpOrdersCollection, getPerpTradesCollection } from "./db.js";
+import { buildPoolKey, computePoolId, encodeRevealAndBatchExecutePerps, encodeErc20Transfer, contractAddresses } from "./contracts.js";
+import { getPublicClient, getTokenBalance, getPoolSlot0SqrtPriceX96, getPoolLiquidity, getHookPoolManager, getPositionClosedFromReceipt } from "./contract-reader.js";
 import { verifyWalletSetup } from "./privy.js";
 import { sendTransactionAsUser } from "./send-transaction.js";
 const MIN_COMMITMENTS = 2;
-async function runOnce() {
-    const keeperUserId = config.keeper.privyUserId;
-    if (!keeperUserId)
-        return;
+/** Minimal ABI of custom errors for decoding batch execute reverts (hook + perp manager + pool). */
+const BATCH_REVERT_ERRORS_ABI = [
+    { type: "error", name: "InsufficientCommitments", inputs: [] },
+    { type: "error", name: "BatchConditionsNotMet", inputs: [] },
+    { type: "error", name: "InvalidPerpCommitment", inputs: [] },
+    { type: "error", name: "DeadlineExpired", inputs: [] },
+    { type: "error", name: "InvalidNonce", inputs: [] },
+    { type: "error", name: "PerpManagerNotSet", inputs: [] },
+    { type: "error", name: "InsufficientMargin", inputs: [] },
+    { type: "error", name: "MarketNotActive", inputs: [] },
+    { type: "error", name: "InvalidSize", inputs: [] },
+    { type: "error", name: "PositionNotFound", inputs: [] },
+    { type: "error", name: "InvalidLeverage", inputs: [] },
+    { type: "error", name: "MarketNotFound", inputs: [] },
+    { type: "error", name: "PoolNotInitialized", inputs: [] },
+    { type: "error", name: "Panic", inputs: [{ name: "code", type: "uint256", internalType: "uint256" }] },
+];
+/**
+ * Detect if a pool has a batch ready (>= MIN_COMMITMENTS and interval passed).
+ * If ready, execute using the provided wallet and return true; otherwise return false.
+ * source: optional label for logs (e.g. "post-reveal" or "keeper").
+ * poolKeyOverride: when provided (e.g. from reveal), use this pool so we read the same pool we wrote to.
+ */
+export async function tryExecuteBatchIfReady(walletSetup, source, poolKeyOverride) {
+    const label = source ? ` (${source})` : "";
     try {
-        const poolKey = buildPoolKey(contractAddresses.mockUsdc, contractAddresses.mockUsdt, contractAddresses.privBatchHook);
+        const poolKey = poolKeyOverride ?? buildPoolKey(contractAddresses.mockUsdc, contractAddresses.mockUsdt, contractAddresses.privBatchHook);
         const poolId = computePoolId(poolKey);
         let commitmentHashes = [];
         try {
@@ -25,26 +48,166 @@ async function runOnce() {
             commitmentHashes = docs.map((d) => d.commitmentHash);
         }
         catch (dbErr) {
-            return; // no DB or error, skip this run
+            return false;
         }
-        if (commitmentHashes.length < MIN_COMMITMENTS)
-            return;
-        const [batchState, batchInterval] = await Promise.all([
-            getBatchState(poolId),
-            getBatchInterval(),
-        ]);
-        const nowSec = Math.floor(Date.now() / 1000);
-        const intervalSec = Number(batchInterval);
-        const lastBatchSec = Number(batchState.lastBatchTimestamp);
-        const nextExecutionSec = lastBatchSec === 0 ? nowSec : lastBatchSec + intervalSec;
-        if (nowSec < nextExecutionSec)
-            return;
-        const walletSetup = await verifyWalletSetup(keeperUserId);
-        if (!walletSetup.isSetup || !walletSetup.walletId) {
-            console.warn("[Keeper] Keeper wallet not set up; skip execute-batch. Link wallet and addSigners for KEEPER_PRIVY_USER_ID.");
-            return;
+        if (commitmentHashes.length < MIN_COMMITMENTS) {
+            console.log("[Perp] Batch%s: detected %d commitment(s) (need %d) — not executing yet", label, commitmentHashes.length, MIN_COMMITMENTS);
+            return false;
+        }
+        const maxBatch = config.keeper.maxPerpBatchSize > 0 ? config.keeper.maxPerpBatchSize : commitmentHashes.length;
+        if (commitmentHashes.length > maxBatch) {
+            commitmentHashes = commitmentHashes.slice(0, maxBatch);
+            console.log("[Perp] Batch%s: capped to %d commitment(s) (KEEPER_MAX_PERP_BATCH_SIZE)", label, commitmentHashes.length);
+        }
+        if (commitmentHashes.length < MIN_COMMITMENTS) {
+            console.log("[Perp] Batch%s: after cap have %d commitment(s) (need %d) — skip (increase KEEPER_MAX_PERP_BATCH_SIZE or wait for more)", label, commitmentHashes.length, MIN_COMMITMENTS);
+            return false;
+        }
+        // Execute as soon as we have 2+ commitments (no batch interval wait)
+        console.log("[Perp] Batch%s: detected %d commitment(s), executing now (poolId: %s)", label, commitmentHashes.length, poolId);
+        console.log("[Perp] Batch%s: commitment hashes: %s", label, commitmentHashes.map((h) => h.slice(0, 18) + "...").join(", "));
+        // Hook must hold quote to settle the perp swap (see scripts/zk/test-perp-e2e.js step 5.6)
+        const quoteToken = config.baseIsCurrency0 ? poolKey.currency1 : poolKey.currency0;
+        let hookQuoteBalance;
+        try {
+            hookQuoteBalance = await getTokenBalance(quoteToken, contractAddresses.privBatchHook);
+            console.log("[Perp] Batch%s: Hook quote balance: %s", label, hookQuoteBalance.toString());
+            if (hookQuoteBalance === 0n) {
+                console.warn("[Perp] Batch%s: Hook has 0 quote balance — fund the hook (e.g. transfer USDC to PRIV_BATCH_HOOK) for batch execute to succeed. See scripts/zk/test-perp-e2e.js step 5.6.", label);
+            }
+        }
+        catch {
+            // ignore balance check errors
+        }
+        // #region agent log
+        let poolLiquidity;
+        let slot0SqrtPriceX96;
+        try {
+            slot0SqrtPriceX96 = await getPoolSlot0SqrtPriceX96(poolId);
+            poolLiquidity = await getPoolLiquidity(poolId);
+            console.log("[Perp] Batch%s: pool slot0 sqrtPriceX96=%s liquidity=%s", label, String(slot0SqrtPriceX96), String(poolLiquidity));
+            if (poolLiquidity === 0n) {
+                const hookPoolManager = await getHookPoolManager();
+                const backendPoolManager = config.contracts.poolManager;
+                if (hookPoolManager.toLowerCase() !== backendPoolManager.toLowerCase()) {
+                    console.warn("[Perp] Batch%s: POOL_MANAGER mismatch — Hook uses %s but backend POOL_MANAGER is %s. Liquidity was likely added to a different manager. Set backend POOL_MANAGER to the Hook's manager and run SetupPoolLiquidity.s.sol with the same POOL_MANAGER. See backend/POOL_SETUP.md.", label, hookPoolManager, backendPoolManager);
+                }
+                else {
+                    console.warn("[Perp] Batch%s: Pool has zero in-range liquidity. Run SetupPoolLiquidity.s.sol with POOL_MANAGER=%s and same MOCK_USDC/MOCK_USDT/HOOK as backend. See backend/POOL_SETUP.md.", label, backendPoolManager);
+                }
+            }
+            fetch("http://127.0.0.1:7250/ingest/45f38e27-30c3-4adc-91dc-b2d064327c1e", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    location: "keeper.ts:batch-execute",
+                    message: "Pool state before simulate",
+                    data: { poolId: poolId.slice(0, 18) + "...", sqrtPriceX96: String(slot0SqrtPriceX96), liquidity: String(poolLiquidity) },
+                    timestamp: Date.now(),
+                    hypothesisId: "A",
+                }),
+            }).catch(() => { });
+        }
+        catch (e) {
+            console.warn("[Perp] Batch%s: could not read pool state", label, e);
+        }
+        // #endregion
+        // Fund Hook with quote if needed (see scripts/zk/test-perp-e2e.js step 5.6) — quoteToken already set above
+        const oneEther = 10n ** 18n;
+        const fundingPriceEstimate18d = 2500n * oneEther;
+        const bufferMultiplier = 10n;
+        const quoteDecMultiplier = 10n ** 6n;
+        let totalBaseSize = 0n;
+        try {
+            const pendingOrders = await getPerpOrdersCollection()
+                .find({ commitmentHash: { $in: commitmentHashes }, status: "pending" })
+                .toArray();
+            for (const o of pendingOrders) {
+                totalBaseSize += BigInt(o.size);
+            }
+        }
+        catch (_) { }
+        const hookQuoteNeeded = totalBaseSize > 0n
+            ? (totalBaseSize * fundingPriceEstimate18d * bufferMultiplier * quoteDecMultiplier) / (oneEther * oneEther)
+            : 0n;
+        if (hookQuoteNeeded > 0n) {
+            const hookQuoteBalance = await getTokenBalance(quoteToken, contractAddresses.privBatchHook);
+            if (hookQuoteBalance < hookQuoteNeeded && walletSetup.walletAddress) {
+                const toTransfer = hookQuoteNeeded - hookQuoteBalance;
+                const userBalance = await getTokenBalance(quoteToken, walletSetup.walletAddress);
+                if (userBalance >= toTransfer) {
+                    const transferData = encodeErc20Transfer(contractAddresses.privBatchHook, toTransfer);
+                    await sendTransactionAsUser(walletSetup.walletId, {
+                        to: quoteToken,
+                        data: transferData,
+                    });
+                    console.log("[Perp] Batch%s: funded Hook with %s quote", label, toTransfer.toString());
+                }
+                else {
+                    console.warn("[Perp] Batch%s: Hook needs %s quote, keeper wallet has %s — skip funding; execute may revert", label, toTransfer.toString(), userBalance.toString());
+                }
+            }
         }
         const data = encodeRevealAndBatchExecutePerps(poolKey, commitmentHashes, config.baseIsCurrency0);
+        // Simulate to get revert reason (eth_call)
+        try {
+            const client = getPublicClient();
+            await client.call({
+                to: contractAddresses.privBatchHook,
+                data,
+            });
+        }
+        catch (simErr) {
+            // Revert data: walk cause chain (same as viem getRevertErrorData); RPC may put data on RpcRequestError.data or nested
+            let revertData;
+            let e = simErr;
+            while (e != null) {
+                const d = e.data;
+                const hex = typeof d === "string" && d.startsWith("0x") ? d : (d && typeof d === "object" && "data" in d && typeof d.data === "string") ? d.data : undefined;
+                if (hex && hex.length >= 10) {
+                    revertData = hex;
+                    break;
+                }
+                e = e.cause;
+            }
+            if (typeof revertData === "string") {
+                try {
+                    const decoded = decodeErrorResult({
+                        abi: BATCH_REVERT_ERRORS_ABI,
+                        data: revertData,
+                    });
+                    const hint = decoded.errorName === "Panic" && Number(decoded.args?.[0]) === 18
+                        ? " (division by zero — often zero liquidity in pool or zero leverage)"
+                        : "";
+                    console.warn("[Perp] Batch%s: simulate revert — %s %s%s", label, decoded.errorName, decoded.args?.length ? String(decoded.args) : "", hint);
+                    if (decoded.errorName === "Panic" && Number(decoded.args?.[0]) === 18) {
+                        console.warn("[Perp] Batch%s: Panic 18 (division by zero). Pool has zero in-range liquidity. Ensure backend POOL_MANAGER matches the Hook's PoolManager and run SetupPoolLiquidity.s.sol with that same POOL_MANAGER. See backend/POOL_SETUP.md.", label);
+                        // #region agent log
+                        fetch("http://127.0.0.1:7250/ingest/45f38e27-30c3-4adc-91dc-b2d064327c1e", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({
+                                location: "keeper.ts:panic18",
+                                message: "Simulate reverted Panic 18",
+                                data: { poolLiquidity: poolLiquidity != null ? String(poolLiquidity) : "unknown", slot0SqrtPriceX96: slot0SqrtPriceX96 != null ? String(slot0SqrtPriceX96) : "unknown" },
+                                timestamp: Date.now(),
+                                hypothesisId: "B",
+                            }),
+                        }).catch(() => { });
+                        // #endregion
+                    }
+                }
+                catch {
+                    console.warn("[Perp] Batch%s: simulate revert (raw): %s", label, revertData.slice(0, 66));
+                }
+            }
+            else {
+                const msg = simErr instanceof Error ? simErr.message : String(simErr);
+                console.warn("[Perp] Batch%s: simulate revert (no data): %s", label, msg);
+            }
+            console.warn("[Perp] Batch%s: skipping send after simulate revert", label);
+            return false;
+        }
         const result = await sendTransactionAsUser(walletSetup.walletId, {
             to: contractAddresses.privBatchHook,
             data,
@@ -53,7 +216,86 @@ async function runOnce() {
             poolId,
             commitmentHash: { $in: commitmentHashes },
         });
-        console.log("[Keeper] Executed perp batch:", result.hash, "commitments:", commitmentHashes.length);
+        let positionClosedEventsKeeper = [];
+        try {
+            positionClosedEventsKeeper = await getPositionClosedFromReceipt(result.hash);
+        }
+        catch (receiptErr) {
+            console.warn("[Perp] Batch%s: could not parse PositionClosed events:", label, receiptErr);
+        }
+        // Mark orders executed and create trade history (same as POST /api/perp/execute)
+        const executedAt = new Date();
+        try {
+            const ordersColl = getPerpOrdersCollection();
+            const tradesColl = getPerpTradesCollection();
+            const executedOrders = await ordersColl
+                .find({ commitmentHash: { $in: commitmentHashes }, status: "pending" })
+                .toArray();
+            let closeIndexKeeper = 0;
+            for (const order of executedOrders) {
+                await ordersColl.updateOne({ commitmentHash: order.commitmentHash }, {
+                    $set: {
+                        status: "executed",
+                        updatedAt: executedAt,
+                        executedAt,
+                        txHash: result.hash,
+                    },
+                });
+                const isClose = !order.isOpen;
+                const ev = isClose && closeIndexKeeper < positionClosedEventsKeeper.length
+                    ? positionClosedEventsKeeper[closeIndexKeeper++]
+                    : null;
+                const realisedPnl = ev != null ? Number(ev.realizedPnL) / 1e18 : null;
+                const notionalClosed = ev != null
+                    ? (Number(ev.sizeClosed >= 0n ? ev.sizeClosed : -ev.sizeClosed) * Number(ev.markPrice)) / 1e18
+                    : 0;
+                const realisedPnlPct = realisedPnl != null && notionalClosed > 0 ? (realisedPnl / notionalClosed) * 100 : null;
+                await tradesColl.insertOne({
+                    privyUserId: order.privyUserId,
+                    walletAddress: order.walletAddress,
+                    market: order.market,
+                    size: order.size,
+                    isLong: order.isLong,
+                    isOpen: order.isOpen,
+                    collateral: order.collateral,
+                    leverage: order.leverage,
+                    entryPrice: null,
+                    realisedPnl: realisedPnl ?? null,
+                    realisedPnlPct: realisedPnlPct ?? null,
+                    txHash: result.hash,
+                    executedAt,
+                    poolId: order.poolId,
+                    commitmentHash: order.commitmentHash,
+                });
+            }
+        }
+        catch (dbErr) {
+            console.warn("[Perp] Batch%s: could not update orders/trades after execute:", label, dbErr);
+        }
+        console.log("[Perp] Batch%s: executed successfully", label, { txHash: result.hash, batchSize: commitmentHashes.length });
+        return true;
+    }
+    catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        console.warn("[Perp] Batch%s: execute failed", label, msg);
+        // Log full error for revert debugging (e.g. InsufficientMargin, InvalidNonce, DeadlineExpired)
+        const err = e;
+        if (err.cause != null || err.response != null || err.error != null) {
+            console.warn("[Perp] Batch%s: error details:", label, err.cause ?? err.response ?? err.error);
+        }
+        return false;
+    }
+}
+async function runOnce() {
+    const keeperUserId = config.keeper.privyUserId;
+    if (!keeperUserId)
+        return;
+    try {
+        const walletSetup = await verifyWalletSetup(keeperUserId);
+        if (!walletSetup.isSetup || !walletSetup.walletId) {
+            return; // log only occasionally to avoid spam
+        }
+        await tryExecuteBatchIfReady({ walletId: walletSetup.walletId, walletAddress: walletSetup.walletAddress }, "keeper");
     }
     catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
@@ -62,13 +304,16 @@ async function runOnce() {
 }
 /**
  * Start the perp batch keeper. Runs every config.keeper.intervalMs when KEEPER_PRIVY_USER_ID is set.
+ * Also, batch execution is triggered immediately after each reveal (see perp routes).
  */
 export function startPerpBatchKeeper() {
-    if (!config.keeper.privyUserId)
+    if (!config.keeper.privyUserId) {
+        console.log("[Perp] Batch: auto-execute on interval disabled (set KEEPER_PRIVY_USER_ID to enable). Batch still runs when a user reveals and conditions are met.");
         return;
-    const ms = Math.max(10000, config.keeper.intervalMs);
-    console.log("[Keeper] Perp batch keeper started (interval %ds). Keeper user: %s", ms / 1000, config.keeper.privyUserId);
-    runOnce(); // run once on start after a short delay so DB is ready
+    }
+    const ms = Math.max(15000, config.keeper.intervalMs);
+    console.log("[Keeper] Perp batch keeper started (check every %ds). Detects pending batch and executes when ready.", ms / 1000);
+    runOnce();
     setInterval(runOnce, ms);
 }
 //# sourceMappingURL=keeper.js.map

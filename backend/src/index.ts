@@ -54,7 +54,8 @@ async function startServer() {
   console.log(`    Keeper:    ${config.keeper.privyUserId ? "enabled (auto execute-batch)" : "disabled (set KEEPER_PRIVY_USER_ID to enable)"}`);
   console.log("========================================");
   console.log("");
-      startPerpBatchKeeper();
+      // Auto batch execute (interval-based keeper) — commented out so batches only run on explicit POST /api/perp/execute
+      // startPerpBatchKeeper();
     });
   } catch (error) {
     console.error("[Server] Failed to start:", error);

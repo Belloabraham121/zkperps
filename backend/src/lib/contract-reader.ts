@@ -2,7 +2,7 @@
  * Contract state reader using viem for reading on-chain data.
  * Used for querying positions, collateral, and other view functions.
  */
-import { createPublicClient, http, encodePacked, keccak256, type Address, type PublicClient } from "viem";
+import { createPublicClient, http, encodePacked, keccak256, parseEventLogs, type Address, type Hash, type PublicClient } from "viem";
 import { arbitrumSepolia } from "viem/chains";
 import { config } from "../config.js";
 
@@ -57,6 +57,31 @@ const PERP_MANAGER_ABI = [
     stateMutability: "view",
     inputs: [{ name: "user", type: "address" }],
     outputs: [{ type: "uint256" }],
+  },
+  {
+    name: "getUnrealizedPnL",
+    type: "function",
+    stateMutability: "view",
+    inputs: [
+      { name: "user", type: "address" },
+      { name: "market", type: "address" },
+    ],
+    outputs: [{ type: "int256" }],
+  },
+] as const;
+
+/** ABI for PositionClosed event (for decoding receipt logs). */
+const POSITION_CLOSED_EVENT_ABI = [
+  {
+    type: "event",
+    name: "PositionClosed",
+    inputs: [
+      { name: "user", type: "address", indexed: true },
+      { name: "market", type: "address", indexed: true },
+      { name: "sizeClosed", type: "int256", indexed: false },
+      { name: "markPrice", type: "uint256", indexed: false },
+      { name: "realizedPnL", type: "int256", indexed: false },
+    ],
   },
 ] as const;
 
@@ -206,6 +231,53 @@ export async function getAvailableMargin(userAddress: Address): Promise<bigint> 
     args: [userAddress],
   }) as bigint;
   return result;
+}
+
+/**
+ * Get unrealized PnL for a user's position in a market (18 decimals, signed).
+ */
+export async function getUnrealizedPnL(
+  userAddress: Address,
+  marketId: Address,
+): Promise<bigint> {
+  const client = getPublicClient();
+  const result = await client.readContract({
+    address: c.perpPositionManager,
+    abi: PERP_MANAGER_ABI,
+    functionName: "getUnrealizedPnL",
+    args: [userAddress, marketId],
+  }) as bigint;
+  return result;
+}
+
+export type PositionClosedEvent = {
+  user: Address;
+  market: Address;
+  sizeClosed: bigint;
+  markPrice: bigint;
+  realizedPnL: bigint;
+};
+
+/**
+ * Wait for tx receipt and parse PositionClosed events from PerpPositionManager.
+ * Returns one entry per close in execution order (for matching to close trades).
+ */
+export async function getPositionClosedFromReceipt(txHash: Hash): Promise<PositionClosedEvent[]> {
+  const client = getPublicClient();
+  const receipt = await client.waitForTransactionReceipt({ hash: txHash });
+  const logs = receipt.logs.filter((log) => log.address.toLowerCase() === c.perpPositionManager.toLowerCase());
+  const parsed = parseEventLogs({
+    abi: POSITION_CLOSED_EVENT_ABI,
+    logs,
+    eventName: "PositionClosed",
+  });
+  return parsed.map((p) => ({
+    user: p.args.user as Address,
+    market: p.args.market as Address,
+    sizeClosed: p.args.sizeClosed as bigint,
+    markPrice: p.args.markPrice as bigint,
+    realizedPnL: p.args.realizedPnL as bigint,
+  }));
 }
 
 /**

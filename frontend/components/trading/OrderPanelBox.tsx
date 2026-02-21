@@ -144,7 +144,7 @@ export function OrderPanelBox() {
             max={LEVERAGE_MAX}
             value={leverage}
             onChange={(e) => setLeverage(Number(e.target.value))}
-            className="h-2 w-full accent-white/50"
+            className="h-2 w-full accent-gray-500"
           />
         </div>
 

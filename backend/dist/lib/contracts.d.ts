@@ -15,9 +15,19 @@ export declare const contractAddresses: {
  */
 export declare function encodeUsdcApprove(spender: `0x${string}`, amount: bigint): `0x${string}`;
 /**
+ * Encode ERC20 transfer(to, amount) for use in sendTransaction.
+ * Used to fund the Hook with quote so it can settle the perp swap (see scripts/zk/test-perp-e2e.js step 5.6).
+ */
+export declare function encodeErc20Transfer(to: `0x${string}`, amount: bigint): `0x${string}`;
+/**
  * Encode PerpPositionManager.depositCollateral(user, amount).
  */
 export declare function encodeDepositCollateral(user: `0x${string}`, amount: bigint): `0x${string}`;
+/**
+ * Encode PerpPositionManager.withdrawCollateral(amount).
+ * Amount in token decimals (e.g. 6 for USDC); contract converts to 18d internally.
+ */
+export declare function encodeWithdrawCollateral(amount: bigint): `0x${string}`;
 /**
  * Two-step deposit: 1) approve USDC to PerpPositionManager, 2) depositCollateral(user, amount).
  * Frontend can call POST /api/trade/send twice (approve then deposit) or we add a single deposit route that sends both.

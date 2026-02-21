@@ -145,6 +145,10 @@ export interface PerpTrade {
   collateral: string;
   leverage: string;
   entryPrice: string | null; // from chain after execute, or null
+  /** Realised P&L in USD when this trade closed a position (null for opens or when not computed). */
+  realisedPnl: number | null;
+  /** Realised P&L as % of margin/collateral (null when realisedPnl not set). */
+  realisedPnlPct: number | null;
   txHash: string;
   executedAt: Date;
   poolId: string;

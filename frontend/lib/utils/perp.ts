@@ -83,11 +83,13 @@ const DEFAULT_ENTRY_PRICE_18 = 2800;
  * Create a PerpIntent from form inputs.
  * LOCK: size is always sent as positive magnitude (uint256); isLong gives direction.
  * Collateral is computed as (size × price) / leverage in 18 decimals (same as e2e script).
+ * For closes, prefer sizeRaw (18-decimal string from chain) to avoid rounding to 0.
  */
 export function createPerpIntent(params: {
   userAddress: string;
   marketId: string;
-  size: number; // Position size (e.g., 0.1 ETH) — must be positive; direction from isLong
+  /** Position size: number (e.g. 0.1 ETH) or raw 18-decimal string from chain (use for closes to avoid rounding). */
+  size: number | string;
   isLong: boolean;
   isOpen: boolean;
   collateral?: number; // Ignored for opens; we use (size × price) / leverage to match contract/e2e
@@ -95,8 +97,14 @@ export function createPerpIntent(params: {
   nonce?: string;
   deadline?: string;
 }): PerpIntent {
-  const sizeMagnitude = Math.abs(params.size);
-  const sizeBigInt = priceToBigInt(sizeMagnitude);
+  const sizeBigInt =
+    typeof params.size === "string"
+      ? (params.size.startsWith("-") ? params.size.slice(1) : params.size).trim()
+      : priceToBigInt(Math.abs(Number(params.size)));
+
+  if (sizeBigInt === "0" || BigInt(sizeBigInt) === BigInt(0)) {
+    throw new Error("Position size cannot be zero");
+  }
 
   const leverageNum = Math.max(1, Number(params.leverage) || 1);
   const leverageBigInt = leverageToBigInt(leverageNum);

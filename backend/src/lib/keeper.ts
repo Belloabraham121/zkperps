@@ -7,7 +7,7 @@ import { decodeErrorResult } from "viem";
 import { config } from "../config.js";
 import { getPendingPerpRevealsCollection, getPerpOrdersCollection, getPerpTradesCollection } from "./db.js";
 import { buildPoolKey, computePoolId, encodeRevealAndBatchExecutePerps, encodeErc20Transfer, contractAddresses, type PoolKey } from "./contracts.js";
-import { getPublicClient, getTokenBalance, getPoolSlot0SqrtPriceX96, getPoolLiquidity, getHookPoolManager } from "./contract-reader.js";
+import { getPublicClient, getTokenBalance, getPoolSlot0SqrtPriceX96, getPoolLiquidity, getHookPoolManager, getPositionClosedFromReceipt } from "./contract-reader.js";
 import { verifyWalletSetup } from "./privy.js";
 import { sendTransactionAsUser } from "./send-transaction.js";
 
@@ -256,6 +256,13 @@ export async function tryExecuteBatchIfReady(
       commitmentHash: { $in: commitmentHashes },
     });
 
+    let positionClosedEventsKeeper: Awaited<ReturnType<typeof getPositionClosedFromReceipt>> = [];
+    try {
+      positionClosedEventsKeeper = await getPositionClosedFromReceipt(result.hash as `0x${string}`);
+    } catch (receiptErr) {
+      console.warn("[Perp] Batch%s: could not parse PositionClosed events:", label, receiptErr);
+    }
+
     // Mark orders executed and create trade history (same as POST /api/perp/execute)
     const executedAt = new Date();
     try {
@@ -264,6 +271,7 @@ export async function tryExecuteBatchIfReady(
       const executedOrders = await ordersColl
         .find({ commitmentHash: { $in: commitmentHashes }, status: "pending" })
         .toArray();
+      let closeIndexKeeper = 0;
       for (const order of executedOrders) {
         await ordersColl.updateOne(
           { commitmentHash: order.commitmentHash },
@@ -276,6 +284,18 @@ export async function tryExecuteBatchIfReady(
             },
           },
         );
+        const isClose = !order.isOpen;
+        const ev =
+          isClose && closeIndexKeeper < positionClosedEventsKeeper.length
+            ? positionClosedEventsKeeper[closeIndexKeeper++]
+            : null;
+        const realisedPnl = ev != null ? Number(ev.realizedPnL) / 1e18 : null;
+        const notionalClosed =
+          ev != null
+            ? (Number(ev.sizeClosed >= 0n ? ev.sizeClosed : -ev.sizeClosed) * Number(ev.markPrice)) / 1e18
+            : 0;
+        const realisedPnlPct =
+          realisedPnl != null && notionalClosed > 0 ? (realisedPnl / notionalClosed) * 100 : null;
         await tradesColl.insertOne({
           privyUserId: order.privyUserId,
           walletAddress: order.walletAddress,
@@ -286,6 +306,8 @@ export async function tryExecuteBatchIfReady(
           collateral: order.collateral,
           leverage: order.leverage,
           entryPrice: null,
+          realisedPnl: realisedPnl ?? null,
+          realisedPnlPct: realisedPnlPct ?? null,
           txHash: result.hash,
           executedAt,
           poolId: order.poolId,

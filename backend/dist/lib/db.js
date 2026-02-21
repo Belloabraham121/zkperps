@@ -29,6 +29,11 @@ export async function connectDB() {
         await db.collection("userWallets").createIndex({ privyUserId: 1 }, { unique: true });
         await db.collection("userWallets").createIndex({ walletAddress: 1 });
         await db.collection("pendingPerpReveals").createIndex({ poolId: 1, createdAt: 1 });
+        await db.collection("perpOrders").createIndex({ commitmentHash: 1 }, { unique: true });
+        await db.collection("perpOrders").createIndex({ privyUserId: 1, status: 1, createdAt: -1 });
+        await db.collection("perpOrders").createIndex({ walletAddress: 1, status: 1, createdAt: -1 });
+        await db.collection("perpTrades").createIndex({ privyUserId: 1, executedAt: -1 });
+        await db.collection("perpTrades").createIndex({ walletAddress: 1, executedAt: -1 });
         return db;
     }
     catch (error) {
@@ -62,6 +67,18 @@ export function getUserWalletsCollection() {
  */
 export function getPendingPerpRevealsCollection() {
     return getDB().collection("pendingPerpReveals");
+}
+/**
+ * Get perp orders collection
+ */
+export function getPerpOrdersCollection() {
+    return getDB().collection("perpOrders");
+}
+/**
+ * Get perp trades collection
+ */
+export function getPerpTradesCollection() {
+    return getDB().collection("perpTrades");
 }
 /**
  * Close MongoDB connection

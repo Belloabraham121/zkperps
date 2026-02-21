@@ -14,6 +14,9 @@ export const config = {
     rpcUrl: process.env.RPC_URL ?? "",
     baseIsCurrency0: process.env.BASE_IS_CURRENCY0 !== "false",
     contracts: {
+        /** Uniswap V4 PoolManager (Arbitrum Sepolia); used to read pool slot0 for debug. */
+        poolManager: (process.env.POOL_MANAGER ??
+            "0xFB3e0C6F74eB1a21CC1Da29aeC80D2Dfe6C9a317"),
         privBatchHook: (process.env.PRIV_BATCH_HOOK ??
             "0xe3ea87fb759c3206a9595048732eb6a6000700c4"),
         perpPositionManager: (process.env.PERP_POSITION_MANAGER ??
@@ -35,6 +38,8 @@ export const config = {
         privyUserId: process.env.KEEPER_PRIVY_USER_ID ?? "",
         /** How often to check (ms). Default 60_000 (1 min). */
         intervalMs: parseInt(process.env.KEEPER_INTERVAL_MS ?? "60000", 10),
+        /** Max commitments per batch (0 = no limit). Use e.g. 2 to test; contract may revert with large batches (e.g. InsufficientMargin on one intent). */
+        maxPerpBatchSize: parseInt(process.env.KEEPER_MAX_PERP_BATCH_SIZE ?? "0", 10),
     },
 };
 //# sourceMappingURL=config.js.map

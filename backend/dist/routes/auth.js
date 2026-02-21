@@ -21,9 +21,7 @@ async function handleVerifyToken(accessToken, res, endpoint) {
             res.status(400).json({ error: "Invalid access token" });
             return;
         }
-        console.log(`[${endpoint}] Verifying access token (length: ${accessToken.length})`);
         const info = await verifyAccessToken(accessToken);
-        console.log(`[${endpoint}] Token verified successfully:`, { userId: info.userId, hasWallet: !!info.walletAddress });
         const signerId = getSignerIdForFrontend();
         if (info.walletAddress) {
             const token = createToken({

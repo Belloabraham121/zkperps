@@ -101,6 +101,8 @@ export interface Position {
   leverage: string;
   lastFundingPaid: string;
   entryCumulativeFunding?: string;
+  /** Unrealized PnL from contract (18 decimals, signed). */
+  unrealizedPnl?: string;
 }
 
 export interface CollateralInfo {
@@ -162,6 +164,9 @@ export interface PerpTradeRecord {
   collateral: string;
   leverage: string;
   entryPrice: string | null;
+  /** Realised P&L in USD when this trade closed a position (null for opens). */
+  realisedPnl: number | null;
+  realisedPnlPct: number | null;
   txHash: string;
   executedAt: string;
   poolId: string;
@@ -312,6 +317,24 @@ export async function depositCollateral(
 ): Promise<{ approveHash: string; depositHash: string }> {
   return apiRequest<{ approveHash: string; depositHash: string }>(
     "/api/perp/deposit",
+    {
+      method: "POST",
+      body: JSON.stringify({ amount }),
+    },
+    token
+  );
+}
+
+/**
+ * Withdraw collateral (USDC) from perp account back to wallet.
+ * Amount in USDC (e.g. 50 for 50 USDC). Cannot exceed available margin.
+ */
+export async function withdrawCollateral(
+  amount: number,
+  token: string
+): Promise<{ hash: string }> {
+  return apiRequest<{ hash: string }>(
+    "/api/perp/withdraw",
     {
       method: "POST",
       body: JSON.stringify({ amount }),

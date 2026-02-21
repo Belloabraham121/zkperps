@@ -42,6 +42,13 @@ const PERP_MANAGER_ABI = [
     ],
     outputs: [],
   },
+  {
+    name: "withdrawCollateral",
+    type: "function",
+    stateMutability: "nonpayable",
+    inputs: [{ name: "amount", type: "uint256" }],
+    outputs: [],
+  },
 ] as const;
 
 const HOOK_ABI = [
@@ -193,6 +200,18 @@ export function encodeDepositCollateral(
     abi: PERP_MANAGER_ABI,
     functionName: "depositCollateral",
     args: [user, amount],
+  });
+}
+
+/**
+ * Encode PerpPositionManager.withdrawCollateral(amount).
+ * Amount in token decimals (e.g. 6 for USDC); contract converts to 18d internally.
+ */
+export function encodeWithdrawCollateral(amount: bigint): `0x${string}` {
+  return encodeFunctionData({
+    abi: PERP_MANAGER_ABI,
+    functionName: "withdrawCollateral",
+    args: [amount],
   });
 }
 

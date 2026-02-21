@@ -20,10 +20,11 @@ import { Router } from "express";
 import { authenticate } from "../middleware/auth.js";
 import { verifyWalletSetup } from "../lib/privy.js";
 import { sendTransactionAsUser } from "../lib/send-transaction.js";
-import { buildPoolKey, computePoolId, encodeSubmitPerpCommitment, encodeSubmitPerpReveal, encodeRevealAndBatchExecutePerps, getDepositCollateralCalldata, contractAddresses, } from "../lib/contracts.js";
-import { computePerpCommitmentHash, getPosition, getTotalCollateral, getAvailableMargin, getBatchState, getBatchInterval, getTokenBalance, } from "../lib/contract-reader.js";
-import { getPendingPerpRevealsCollection } from "../lib/db.js";
+import { buildPoolKey, computePoolId, encodeSubmitPerpCommitment, encodeSubmitPerpReveal, encodeRevealAndBatchExecutePerps, getDepositCollateralCalldata, encodeWithdrawCollateral, encodeErc20Transfer, contractAddresses, } from "../lib/contracts.js";
+import { computePerpCommitmentHash, getPosition, getUnrealizedPnL, getPositionClosedFromReceipt, getTotalCollateral, getAvailableMargin, getBatchState, getBatchInterval, getTokenBalance, getPublicClient, getPoolSlot0SqrtPriceX96, getPoolLiquidity, } from "../lib/contract-reader.js";
+import { getPendingPerpRevealsCollection, getPerpOrdersCollection, getPerpTradesCollection, } from "../lib/db.js";
 import { config } from "../config.js";
+import { tryExecuteBatchIfReady } from "../lib/keeper.js";
 /** Normalize intent fields that may be string to bigint for contract calls */
 function intentToBigint(intent) {
     const big = (v) => v === undefined ? 0n : typeof v === "bigint" ? v : BigInt(String(v));
@@ -91,8 +92,17 @@ perpRouter.post("/compute-commitment-hash", async (req, res) => {
             res.status(400).json({ error: "Invalid intent structure" });
             return;
         }
-        // Compute commitment hash (read-only call); normalize string numbers to bigint
-        const commitmentHash = await computePerpCommitmentHash(intentToBigint(intent));
+        const normalized = intentToBigint(intent);
+        if (normalized.size <= 0n) {
+            res.status(400).json({ error: "intent.size must be positive (magnitude); use isLong for direction" });
+            return;
+        }
+        if (normalized.leverage <= 0n) {
+            res.status(400).json({ error: "intent.leverage must be positive (e.g. 5e18 for 5x)" });
+            return;
+        }
+        // Compute commitment hash (read-only call)
+        const commitmentHash = await computePerpCommitmentHash(normalized);
         res.json({ commitmentHash });
     }
     catch (e) {
@@ -133,6 +143,18 @@ perpRouter.post("/deposit", async (req, res) => {
         }
         const amountRaw = BigInt(Math.floor(amountNum * 10 ** USDC_DECIMALS));
         const userAddress = walletSetup.walletAddress;
+        console.log("[Perp] Deposit: wallet address", userAddress);
+        const balance = await getTokenBalance(contractAddresses.mockUsdc, userAddress);
+        if (balance < amountRaw) {
+            const balanceFormatted = Number(balance) / 10 ** USDC_DECIMALS;
+            const msg = `Wallet has ${balanceFormatted.toFixed(2)} USDC but deposit amount is ${amountNum.toFixed(2)} USDC. Add USDC to your wallet first.`;
+            res.status(400).json({
+                error: msg,
+                balanceUsdc: balanceFormatted,
+                requestedUsdc: amountNum,
+            });
+            return;
+        }
         const { approveData, depositData } = getDepositCollateralCalldata(userAddress, amountRaw);
         // 1. Approve USDC to PerpPositionManager
         const approveResult = await sendTransactionAsUser(walletSetup.walletId, {
@@ -149,6 +171,61 @@ perpRouter.post("/deposit", async (req, res) => {
     catch (e) {
         const message = e instanceof Error ? e.message : "Deposit failed";
         console.error("[Perp] Deposit error:", message);
+        res.status(500).json({ error: message });
+    }
+});
+/**
+ * POST /api/perp/withdraw
+ * Body: { amount: number } — amount in USDC (e.g. 100.50)
+ *
+ * Withdraws collateral from PerpPositionManager back to the user's wallet.
+ * Reverts if amount is 0 or available margin is less than amount.
+ *
+ * @returns { hash: string } Transaction hash
+ */
+perpRouter.post("/withdraw", async (req, res) => {
+    try {
+        if (!req.user?.sub) {
+            res.status(401).json({ error: "Not authenticated" });
+            return;
+        }
+        const walletSetup = await verifyWalletSetup(req.user.sub);
+        if (!walletSetup.isSetup || !walletSetup.walletAddress) {
+            res.status(400).json({
+                error: walletSetup.error || "Wallet not properly set up",
+                instructions: "Call POST /api/auth/link with walletAddress and walletId, then call addSigners() with the returned signerId.",
+            });
+            return;
+        }
+        const { amount } = req.body;
+        const amountNum = amount !== undefined ? Number(amount) : NaN;
+        if (Number.isNaN(amountNum) || amountNum <= 0) {
+            res.status(400).json({ error: "amount is required and must be a positive number (USDC)" });
+            return;
+        }
+        const amountRaw = BigInt(Math.floor(amountNum * 10 ** USDC_DECIMALS));
+        const userAddress = walletSetup.walletAddress;
+        const availableMargin = await getAvailableMargin(userAddress);
+        const amount18 = amountRaw * BigInt(10 ** (18 - USDC_DECIMALS));
+        if (availableMargin < amount18) {
+            const availableFormatted = Number(availableMargin) / 1e18;
+            res.status(400).json({
+                error: "Insufficient available margin to withdraw.",
+                availableMargin: availableFormatted,
+                requestedUsdc: amountNum,
+            });
+            return;
+        }
+        const data = encodeWithdrawCollateral(amountRaw);
+        const result = await sendTransactionAsUser(walletSetup.walletId, {
+            to: contractAddresses.perpPositionManager,
+            data,
+        });
+        res.json({ hash: result.hash });
+    }
+    catch (e) {
+        const message = e instanceof Error ? e.message : "Withdraw failed";
+        console.error("[Perp] Withdraw error:", message);
         res.status(500).json({ error: message });
     }
 });
@@ -232,10 +309,24 @@ perpRouter.post("/reveal", async (req, res) => {
             res.status(400).json({ error: "Invalid intent structure" });
             return;
         }
+        // Normalize to bigint and validate (contract uses uint256 size = magnitude; zero causes division-by-zero / Panic 18)
+        const normalized = intentToBigint(intent);
+        if (normalized.size <= 0n) {
+            res.status(400).json({
+                error: "intent.size must be positive (magnitude); use isLong for direction",
+            });
+            return;
+        }
+        if (normalized.leverage <= 0n) {
+            res.status(400).json({ error: "intent.leverage must be positive (e.g. 5e18 for 5x)" });
+            return;
+        }
+        // Use normalized intent for encoding so contract always gets valid values (e.g. positive size)
+        const intentForTx = normalized;
         // Build pool key if not provided
         const poolKey = providedPoolKey || buildPoolKey(contractAddresses.mockUsdc, contractAddresses.mockUsdt, contractAddresses.privBatchHook);
         // Encode transaction data
-        const data = encodeSubmitPerpReveal(poolKey, intent);
+        const data = encodeSubmitPerpReveal(poolKey, intentForTx);
         // Send transaction via Privy (server-side signing)
         // Uses authorization_context with authorization_private_keys for server-side signing
         // No user approval popup required - transaction is signed by backend authorization key
@@ -243,21 +334,42 @@ perpRouter.post("/reveal", async (req, res) => {
             to: contractAddresses.privBatchHook,
             data,
         });
-        // Track revealed commitment for pending-batch: so we know which hashes can be executed
+        // Track revealed commitment for pending-batch and save order for open orders / trade history
+        const commitmentHash = await computePerpCommitmentHash(intentForTx);
+        const poolId = computePoolId(poolKey);
+        const now = new Date();
         try {
-            const normalizedIntent = intentToBigint(intent);
-            const commitmentHash = await computePerpCommitmentHash(normalizedIntent);
-            const poolId = computePoolId(poolKey);
             await getPendingPerpRevealsCollection().insertOne({
                 poolId,
                 commitmentHash,
-                createdAt: new Date(),
+                createdAt: now,
             });
+            // Save order so frontend can show open orders and we can create trade record when batch executes
+            await getPerpOrdersCollection().insertOne({
+                privyUserId: req.user.sub,
+                walletAddress: walletSetup.walletAddress,
+                poolId,
+                commitmentHash,
+                market: intentForTx.market,
+                size: String(intentForTx.size),
+                isLong: intentForTx.isLong,
+                isOpen: intentForTx.isOpen,
+                collateral: String(intentForTx.collateral),
+                leverage: String(intentForTx.leverage),
+                nonce: String(intentForTx.nonce),
+                deadline: String(intentForTx.deadline),
+                status: "pending",
+                createdAt: now,
+                updatedAt: now,
+            });
+            console.log("[Perp] Stored pending reveal and order (poolId: %s) intent size=%s collateral=%s leverage=%s", poolId.slice(0, 18) + "...", String(intentForTx.size), String(intentForTx.collateral), String(intentForTx.leverage));
         }
         catch (dbErr) {
-            // Reveal already succeeded on-chain; tracking is best-effort (e.g. no MongoDB)
-            console.warn("[Perp] Could not store pending reveal for batch:", dbErr);
+            // Reveal already succeeded on-chain; tracking is best-effort (e.g. no MongoDB or duplicate commitmentHash)
+            console.warn("[Perp] Could not store pending reveal/order for batch:", dbErr);
         }
+        // Auto-execute batch when ready (2+ pending and batch interval passed). Fire-and-forget so response returns immediately.
+        tryExecuteBatchIfReady({ walletId: walletSetup.walletId, walletAddress: walletSetup.walletAddress }, "post-reveal", poolKey).catch((err) => console.warn("[Perp] Post-reveal auto-execute check failed:", err));
         res.json({ hash: result.hash });
     }
     catch (e) {
@@ -311,8 +423,56 @@ perpRouter.post("/execute-batch", async (req, res) => {
             res.status(400).json({ error: "commitmentHashes array is required or have pending reveals (call GET /api/perp/pending-batch)" });
             return;
         }
+        const fromBody = (bodyHashes?.length ?? 0) > 0;
+        console.log("[Perp] Execute-batch: executing batch", {
+            commitmentCount: commitmentHashes.length,
+            source: fromBody ? "body" : "pending DB",
+        });
         // Use config default if not provided
         const baseIsCurrency0Value = baseIsCurrency0 ?? config.baseIsCurrency0;
+        // Fund Hook with quote if needed (see scripts/zk/test-perp-e2e.js step 5.6)
+        const quoteTokenBatch = baseIsCurrency0Value ? poolKey.currency1 : poolKey.currency0;
+        const quoteDecBatch = 6;
+        const oneEtherBatch = 10n ** 18n;
+        const fundingPriceEstimate18dBatch = 2500n * oneEtherBatch;
+        const bufferMultiplierBatch = 10n;
+        const quoteDecMultiplierBatch = 10n ** BigInt(quoteDecBatch);
+        let totalBaseSizeBatch = 0n;
+        try {
+            const pendingOrdersBatch = await getPerpOrdersCollection()
+                .find({ commitmentHash: { $in: commitmentHashes }, status: "pending" })
+                .toArray();
+            for (const o of pendingOrdersBatch) {
+                totalBaseSizeBatch += BigInt(o.size);
+            }
+        }
+        catch (_) { }
+        const hookQuoteNeededBatch = totalBaseSizeBatch > 0n
+            ? (totalBaseSizeBatch * fundingPriceEstimate18dBatch * bufferMultiplierBatch * quoteDecMultiplierBatch) / (oneEtherBatch * oneEtherBatch)
+            : 0n;
+        let hookQuoteBalanceBatch = 0n;
+        try {
+            hookQuoteBalanceBatch = await getTokenBalance(quoteTokenBatch, contractAddresses.privBatchHook);
+        }
+        catch (_) { }
+        if (hookQuoteNeededBatch > 0n && hookQuoteBalanceBatch < hookQuoteNeededBatch) {
+            const toTransferBatch = hookQuoteNeededBatch - hookQuoteBalanceBatch;
+            const userQuoteBalanceBatch = await getTokenBalance(quoteTokenBatch, walletSetup.walletAddress);
+            if (userQuoteBalanceBatch < toTransferBatch) {
+                res.status(400).json({
+                    error: "Insufficient USDC to fund Hook for batch execution.",
+                    needed: toTransferBatch.toString(),
+                    have: userQuoteBalanceBatch.toString(),
+                });
+                return;
+            }
+            const transferDataBatch = encodeErc20Transfer(contractAddresses.privBatchHook, toTransferBatch);
+            await sendTransactionAsUser(walletSetup.walletId, {
+                to: quoteTokenBatch,
+                data: transferDataBatch,
+            });
+            console.log("[Perp] Execute-batch: funded Hook with", toTransferBatch.toString(), "quote");
+        }
         // Encode transaction data
         const data = encodeRevealAndBatchExecutePerps(poolKey, commitmentHashes, baseIsCurrency0Value);
         // Send transaction via Privy (server-side signing)
@@ -323,23 +483,289 @@ perpRouter.post("/execute-batch", async (req, res) => {
             to: contractAddresses.privBatchHook,
             data,
         });
-        // Remove executed commitment hashes from pending so they are not suggested again
+        console.log("[Perp] Execute-batch: executed successfully", {
+            txHash: result.hash,
+            batchSize: commitmentHashes.length,
+        });
+        const poolId = computePoolId(poolKey);
+        const executedAt = new Date();
+        let positionClosedEvents = [];
         try {
-            const poolId = computePoolId(poolKey);
-            const coll = getPendingPerpRevealsCollection();
-            await coll.deleteMany({
+            positionClosedEvents = await getPositionClosedFromReceipt(result.hash);
+        }
+        catch (receiptErr) {
+            console.warn("[Perp] Could not parse PositionClosed events from receipt:", receiptErr);
+        }
+        // Remove executed commitment hashes from pending; mark orders executed; create trade history
+        try {
+            await getPendingPerpRevealsCollection().deleteMany({
                 poolId,
                 commitmentHash: { $in: commitmentHashes },
             });
+            const ordersColl = getPerpOrdersCollection();
+            const tradesColl = getPerpTradesCollection();
+            const executedOrders = await ordersColl
+                .find({ commitmentHash: { $in: commitmentHashes }, status: "pending" })
+                .toArray();
+            let closeIndex = 0;
+            for (const order of executedOrders) {
+                await ordersColl.updateOne({ commitmentHash: order.commitmentHash }, {
+                    $set: {
+                        status: "executed",
+                        updatedAt: executedAt,
+                        executedAt,
+                        txHash: result.hash,
+                    },
+                });
+                const isClose = !order.isOpen;
+                const ev = isClose && closeIndex < positionClosedEvents.length ? positionClosedEvents[closeIndex++] : null;
+                const realisedPnl = ev != null ? Number(ev.realizedPnL) / 1e18 : null;
+                const notionalClosed = ev != null
+                    ? (Number(ev.sizeClosed >= 0n ? ev.sizeClosed : -ev.sizeClosed) * Number(ev.markPrice)) / 1e18
+                    : 0;
+                const realisedPnlPct = realisedPnl != null && notionalClosed > 0 ? (realisedPnl / notionalClosed) * 100 : null;
+                await tradesColl.insertOne({
+                    privyUserId: order.privyUserId,
+                    walletAddress: order.walletAddress,
+                    market: order.market,
+                    size: order.size,
+                    isLong: order.isLong,
+                    isOpen: order.isOpen,
+                    collateral: order.collateral,
+                    leverage: order.leverage,
+                    entryPrice: null,
+                    realisedPnl: realisedPnl ?? null,
+                    realisedPnlPct: realisedPnlPct ?? null,
+                    txHash: result.hash,
+                    executedAt,
+                    poolId: order.poolId,
+                    commitmentHash: order.commitmentHash,
+                });
+            }
         }
         catch (dbErr) {
-            console.warn("[Perp] Could not clear pending reveals after execute-batch:", dbErr);
+            console.warn("[Perp] Could not update orders/trades after execute-batch:", dbErr);
         }
         res.json({ hash: result.hash });
     }
     catch (e) {
         const message = e instanceof Error ? e.message : "Failed to execute batch";
         console.error("[Perp] Execute batch error:", message);
+        res.status(500).json({ error: message });
+    }
+});
+const MIN_COMMITMENTS_FOR_EXECUTE = 2;
+/**
+ * POST /api/perp/execute
+ * No body required. Fetches pending reveals from DB for the default pool and executes the batch.
+ * Convenience endpoint for a one-click "Execute batch" button.
+ *
+ * @returns { hash: string, batchSize: number } Transaction hash and number of commitments executed
+ */
+perpRouter.post("/execute", async (req, res) => {
+    try {
+        if (!req.user?.sub) {
+            res.status(401).json({ error: "Not authenticated" });
+            return;
+        }
+        const walletSetup = await verifyWalletSetup(req.user.sub);
+        if (!walletSetup.isSetup) {
+            res.status(400).json({
+                error: walletSetup.error || "Wallet not properly set up",
+                instructions: "Call POST /api/auth/link with walletAddress and walletId, then call addSigners() with the returned signerId.",
+            });
+            return;
+        }
+        const poolKey = buildPoolKey(contractAddresses.mockUsdc, contractAddresses.mockUsdt, contractAddresses.privBatchHook);
+        const poolId = computePoolId(poolKey);
+        let commitmentHashes = [];
+        try {
+            const docs = await getPendingPerpRevealsCollection()
+                .find({ poolId })
+                .sort({ createdAt: 1 })
+                .toArray();
+            commitmentHashes = docs.map((d) => d.commitmentHash);
+        }
+        catch (dbErr) {
+            console.warn("[Perp] Execute: could not read pending reveals:", dbErr);
+        }
+        if (commitmentHashes.length < MIN_COMMITMENTS_FOR_EXECUTE) {
+            res.status(400).json({
+                error: `Need at least ${MIN_COMMITMENTS_FOR_EXECUTE} pending commitments to execute.`,
+                count: commitmentHashes.length,
+                minCommitments: MIN_COMMITMENTS_FOR_EXECUTE,
+            });
+            return;
+        }
+        // Execute as soon as we have 2+ commitments (no batch interval wait)
+        const baseIsCurrency0Value = config.baseIsCurrency0;
+        // Fund Hook with quote if needed (see scripts/zk/test-perp-e2e.js step 5.6).
+        // Hook must hold quote to settle the perp swap; otherwise execution reverts with division by zero.
+        const quoteToken = baseIsCurrency0Value ? poolKey.currency1 : poolKey.currency0;
+        const quoteDec = 6;
+        const oneEther = 10n ** 18n;
+        const fundingPriceEstimate18d = 2500n * oneEther;
+        const bufferMultiplier = 10n;
+        const quoteDecMultiplier = 10n ** BigInt(quoteDec);
+        let totalBaseSize = 0n;
+        try {
+            const pendingOrders = await getPerpOrdersCollection()
+                .find({ commitmentHash: { $in: commitmentHashes }, status: "pending" })
+                .toArray();
+            for (const o of pendingOrders) {
+                totalBaseSize += BigInt(o.size);
+            }
+        }
+        catch (_) { }
+        const hookQuoteNeeded = totalBaseSize > 0n
+            ? (totalBaseSize * fundingPriceEstimate18d * bufferMultiplier * quoteDecMultiplier) / (oneEther * oneEther)
+            : 0n;
+        let hookQuoteBalance = 0n;
+        try {
+            hookQuoteBalance = await getTokenBalance(quoteToken, contractAddresses.privBatchHook);
+        }
+        catch (_) { }
+        console.log("[Perp] Execute: funding check", {
+            totalBaseSize: totalBaseSize.toString(),
+            hookQuoteNeeded: hookQuoteNeeded.toString(),
+            hookQuoteBalance: hookQuoteBalance.toString(),
+            pendingOrdersCount: commitmentHashes.length,
+        });
+        if (hookQuoteNeeded > 0n && hookQuoteBalance < hookQuoteNeeded) {
+            const toTransfer = hookQuoteNeeded - hookQuoteBalance;
+            const userQuoteBalance = await getTokenBalance(quoteToken, walletSetup.walletAddress);
+            if (userQuoteBalance < toTransfer) {
+                res.status(400).json({
+                    error: "Insufficient USDC to fund Hook for batch execution.",
+                    needed: toTransfer.toString(),
+                    have: userQuoteBalance.toString(),
+                    hint: "Transfer quote (USDC) to the Hook so it can settle the perp swap. The executor wallet must hold enough USDC.",
+                });
+                return;
+            }
+            const transferData = encodeErc20Transfer(contractAddresses.privBatchHook, toTransfer);
+            await sendTransactionAsUser(walletSetup.walletId, {
+                to: quoteToken,
+                data: transferData,
+            });
+            console.log("[Perp] Execute: funded Hook with", toTransfer.toString(), "quote for batch");
+        }
+        const data = encodeRevealAndBatchExecutePerps(poolKey, commitmentHashes, baseIsCurrency0Value);
+        // Simulate before sending; on division-by-zero, return clear error if pool has no liquidity
+        try {
+            const client = getPublicClient();
+            await client.call({
+                to: contractAddresses.privBatchHook,
+                data,
+            });
+        }
+        catch (simErr) {
+            const msg = simErr instanceof Error ? simErr.message : String(simErr);
+            const isDivisionByZero = msg.includes("division or modulo by zero") ||
+                msg.includes("Panic 18") ||
+                (typeof simErr.data === "string" &&
+                    simErr.data?.includes("18"));
+            if (isDivisionByZero) {
+                let poolLiquidity;
+                let slot0SqrtPriceX96;
+                try {
+                    slot0SqrtPriceX96 = await getPoolSlot0SqrtPriceX96(poolId);
+                    poolLiquidity = await getPoolLiquidity(poolId);
+                }
+                catch (_) { }
+                const zeroLiquidity = poolLiquidity === 0n || poolLiquidity === undefined;
+                const notInitialized = slot0SqrtPriceX96 === 0n || slot0SqrtPriceX96 === undefined;
+                res.status(400).json({
+                    error: "Execution would revert: division or modulo by zero.",
+                    cause: zeroLiquidity || notInitialized
+                        ? "Pool has zero in-range liquidity or is not initialized."
+                        : "Contract reverted during simulation.",
+                    poolLiquidity: poolLiquidity?.toString() ?? "unknown",
+                    slot0SqrtPriceX96: slot0SqrtPriceX96?.toString() ?? "unknown",
+                    hint: "Initialize the pool and add liquidity (e.g. run SetupPoolLiquidity.s.sol). See backend/POOL_SETUP.md.",
+                });
+                return;
+            }
+            // Other simulate error: still return 500 with message so client sees something
+            console.error("[Perp] Execute: simulate failed", msg);
+            res.status(500).json({
+                error: "Batch execution simulation failed.",
+                details: msg,
+            });
+            return;
+        }
+        const result = await sendTransactionAsUser(walletSetup.walletId, {
+            to: contractAddresses.privBatchHook,
+            data,
+        });
+        console.log("[Perp] Execute: executed successfully", {
+            txHash: result.hash,
+            batchSize: commitmentHashes.length,
+        });
+        const executedAt = new Date();
+        let positionClosedEventsExecute = [];
+        try {
+            positionClosedEventsExecute = await getPositionClosedFromReceipt(result.hash);
+        }
+        catch (receiptErr) {
+            console.warn("[Perp] Could not parse PositionClosed events from receipt:", receiptErr);
+        }
+        try {
+            await getPendingPerpRevealsCollection().deleteMany({
+                poolId,
+                commitmentHash: { $in: commitmentHashes },
+            });
+            const ordersColl = getPerpOrdersCollection();
+            const tradesColl = getPerpTradesCollection();
+            const executedOrders = await ordersColl
+                .find({ commitmentHash: { $in: commitmentHashes }, status: "pending" })
+                .toArray();
+            let closeIndexExecute = 0;
+            for (const order of executedOrders) {
+                await ordersColl.updateOne({ commitmentHash: order.commitmentHash }, {
+                    $set: {
+                        status: "executed",
+                        updatedAt: executedAt,
+                        executedAt,
+                        txHash: result.hash,
+                    },
+                });
+                const isClose = !order.isOpen;
+                const ev = isClose && closeIndexExecute < positionClosedEventsExecute.length
+                    ? positionClosedEventsExecute[closeIndexExecute++]
+                    : null;
+                const realisedPnl = ev != null ? Number(ev.realizedPnL) / 1e18 : null;
+                const notionalClosed = ev != null
+                    ? (Number(ev.sizeClosed >= 0n ? ev.sizeClosed : -ev.sizeClosed) * Number(ev.markPrice)) / 1e18
+                    : 0;
+                const realisedPnlPct = realisedPnl != null && notionalClosed > 0 ? (realisedPnl / notionalClosed) * 100 : null;
+                await tradesColl.insertOne({
+                    privyUserId: order.privyUserId,
+                    walletAddress: order.walletAddress,
+                    market: order.market,
+                    size: order.size,
+                    isLong: order.isLong,
+                    isOpen: order.isOpen,
+                    collateral: order.collateral,
+                    leverage: order.leverage,
+                    entryPrice: null,
+                    realisedPnl: realisedPnl ?? null,
+                    realisedPnlPct: realisedPnlPct ?? null,
+                    txHash: result.hash,
+                    executedAt,
+                    poolId: order.poolId,
+                    commitmentHash: order.commitmentHash,
+                });
+            }
+        }
+        catch (dbErr) {
+            console.warn("[Perp] Could not update orders/trades after execute:", dbErr);
+        }
+        res.json({ hash: result.hash, batchSize: commitmentHashes.length });
+    }
+    catch (e) {
+        const message = e instanceof Error ? e.message : "Failed to execute batch";
+        console.error("[Perp] Execute error:", message);
         res.status(500).json({ error: message });
     }
 });
@@ -369,32 +795,46 @@ perpRouter.get("/pending-batch", async (_req, res) => {
             // MongoDB not connected or other error
             console.warn("[Perp] Pending-batch: could not read pending reveals:", dbErr);
         }
-        const [batchState, batchInterval] = await Promise.all([
-            getBatchState(poolId),
-            getBatchInterval(),
-        ]);
-        const nowSec = Math.floor(Date.now() / 1000);
-        const intervalSec = Number(batchInterval);
-        const lastBatchSec = Number(batchState.lastBatchTimestamp);
-        const nextExecutionSec = lastBatchSec === 0 ? nowSec : lastBatchSec + intervalSec;
-        const canExecute = commitmentHashes.length >= MIN_COMMITMENTS && nowSec >= nextExecutionSec;
-        const nextExecutionAt = commitmentHashes.length >= MIN_COMMITMENTS
-            ? new Date(nextExecutionSec * 1000).toISOString()
-            : null;
+        const canExecute = commitmentHashes.length >= MIN_COMMITMENTS;
         res.json({
             poolId,
             commitmentHashes,
             count: commitmentHashes.length,
             canExecute,
-            nextExecutionAt,
-            lastBatchTimestamp: batchState.lastBatchTimestamp.toString(),
-            batchIntervalSeconds: intervalSec,
+            nextExecutionAt: canExecute ? new Date().toISOString() : null,
             minCommitments: MIN_COMMITMENTS,
         });
     }
     catch (e) {
         const message = e instanceof Error ? e.message : "Failed to get pending batch";
         console.error("[Perp] Pending-batch error:", message);
+        res.status(500).json({ error: message });
+    }
+});
+/**
+ * POST /api/perp/clear-pending-batch
+ * Body: { poolId?: string } (optional; default pool if omitted)
+ *
+ * Removes all pending perp reveals for the pool from the DB. Use this when the
+ * current pending batch contains bad reveals (e.g. from the old negative-size
+ * intent) and you want to stop retrying and start fresh with new commits/reveals.
+ * Does not remove anything on-chain.
+ */
+perpRouter.post("/clear-pending-batch", async (req, res) => {
+    try {
+        if (!req.user?.sub) {
+            res.status(401).json({ error: "Not authenticated" });
+            return;
+        }
+        const poolId = req.body.poolId;
+        const filter = poolId ? { poolId } : { poolId: computePoolId(buildPoolKey(contractAddresses.mockUsdc, contractAddresses.mockUsdt, contractAddresses.privBatchHook)) };
+        const result = await getPendingPerpRevealsCollection().deleteMany(filter);
+        console.log("[Perp] Clear-pending-batch: deleted %d pending reveal(s)", result.deletedCount);
+        res.json({ deletedCount: result.deletedCount, poolId: filter.poolId });
+    }
+    catch (e) {
+        const message = e instanceof Error ? e.message : "Failed to clear pending batch";
+        console.error("[Perp] Clear-pending-batch error:", message);
         res.status(500).json({ error: message });
     }
 });
@@ -419,8 +859,11 @@ perpRouter.get("/position", async (req, res) => {
             return;
         }
         const marketId = req.query.marketId || contractAddresses.marketId;
-        // Get position from contract
-        const position = await getPosition(walletSetup.walletAddress, marketId);
+        // Get position and unrealized PnL from contract
+        const [position, unrealizedPnl] = await Promise.all([
+            getPosition(walletSetup.walletAddress, marketId),
+            getUnrealizedPnL(walletSetup.walletAddress, marketId),
+        ]);
         res.json({
             marketId,
             position: {
@@ -430,6 +873,7 @@ perpRouter.get("/position", async (req, res) => {
                 leverage: position.leverage.toString(),
                 lastFundingPaid: position.lastFundingPaid.toString(),
                 entryCumulativeFunding: position.entryCumulativeFunding.toString(),
+                unrealizedPnl: unrealizedPnl.toString(),
             },
         });
     }
@@ -499,13 +943,6 @@ perpRouter.get("/balances", async (req, res) => {
             getTokenBalance(contractAddresses.mockUsdc, userAddress),
             getTokenBalance(contractAddresses.mockUsdt, userAddress),
         ]);
-        // Debug: log address and balances so we can verify we're querying the right wallet/token
-        console.log("[Perp] GET /balances", {
-            userAddress,
-            usdcContract: contractAddresses.mockUsdc,
-            usdcBalanceRaw: usdcBalance.toString(),
-            usdtBalanceRaw: usdtBalance.toString(),
-        });
         res.json({
             usdc: usdcBalance.toString(),
             usdt: usdtBalance.toString(),
@@ -563,6 +1000,114 @@ perpRouter.get("/batch-interval", async (_req, res) => {
     catch (e) {
         const message = e instanceof Error ? e.message : "Failed to get batch interval";
         console.error("[Perp] Get batch interval error:", message);
+        res.status(500).json({ error: message });
+    }
+});
+/**
+ * GET /api/perp/orders
+ * Query: { status?: "pending" | "executed" | "cancelled" | "all" } — default "pending" (open orders)
+ *
+ * Returns orders for the authenticated user (open orders or full order history).
+ *
+ * @returns { orders: PerpOrder[] }
+ */
+perpRouter.get("/orders", async (req, res) => {
+    try {
+        if (!req.user?.sub) {
+            res.status(401).json({ error: "Not authenticated" });
+            return;
+        }
+        const status = req.query.status || "pending";
+        const filter = { privyUserId: req.user.sub };
+        if (status !== "all" && (status === "pending" || status === "executed" || status === "cancelled")) {
+            filter.status = status;
+        }
+        const orders = await getPerpOrdersCollection()
+            .find(filter)
+            .sort({ createdAt: -1 })
+            .limit(100)
+            .toArray();
+        res.json({
+            orders: orders.map((o) => ({
+                ...o,
+                id: o._id?.toString?.(),
+            })),
+        });
+    }
+    catch (e) {
+        const message = e instanceof Error ? e.message : "Failed to get orders";
+        console.error("[Perp] Get orders error:", message);
+        res.status(500).json({ error: message });
+    }
+});
+/**
+ * GET /api/perp/trade-history
+ * Query: { limit?: number } — default 50, max 200
+ *
+ * Returns executed trade history for the authenticated user.
+ *
+ * @returns { trades: PerpTrade[] }
+ */
+perpRouter.get("/trade-history", async (req, res) => {
+    try {
+        if (!req.user?.sub) {
+            res.status(401).json({ error: "Not authenticated" });
+            return;
+        }
+        const limit = Math.min(Math.max(Number(req.query.limit) || 50, 1), 200);
+        const trades = await getPerpTradesCollection()
+            .find({ privyUserId: req.user.sub })
+            .sort({ executedAt: -1 })
+            .limit(limit)
+            .toArray();
+        res.json({
+            trades: trades.map((t) => ({
+                ...t,
+                id: t._id?.toString?.(),
+            })),
+        });
+    }
+    catch (e) {
+        const message = e instanceof Error ? e.message : "Failed to get trade history";
+        console.error("[Perp] Get trade history error:", message);
+        res.status(500).json({ error: message });
+    }
+});
+/**
+ * GET /api/perp/position-history
+ * Query: { marketId?: string, limit?: number } — default limit 50, max 200
+ *
+ * Returns position-relevant history: trades that opened or closed positions for the user.
+ * Frontend can use this together with GET /api/perp/position for current position.
+ *
+ * @returns { trades: PerpTrade[] }
+ */
+perpRouter.get("/position-history", async (req, res) => {
+    try {
+        if (!req.user?.sub) {
+            res.status(401).json({ error: "Not authenticated" });
+            return;
+        }
+        const marketId = req.query.marketId;
+        const limit = Math.min(Math.max(Number(req.query.limit) || 50, 1), 200);
+        const filter = { privyUserId: req.user.sub };
+        if (marketId)
+            filter.market = marketId;
+        const trades = await getPerpTradesCollection()
+            .find(filter)
+            .sort({ executedAt: -1 })
+            .limit(limit)
+            .toArray();
+        res.json({
+            trades: trades.map((t) => ({
+                ...t,
+                id: t._id?.toString?.(),
+            })),
+        });
+    }
+    catch (e) {
+        const message = e instanceof Error ? e.message : "Failed to get position history";
+        console.error("[Perp] Get position history error:", message);
         res.status(500).json({ error: message });
     }
 });
