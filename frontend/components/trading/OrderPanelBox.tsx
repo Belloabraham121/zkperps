@@ -73,6 +73,21 @@ export function OrderPanelBox() {
         leverage,
       });
 
+      // Log what we send (matches e2e: size in 18d, collateral = (size × 2800) / leverage, leverage in 18d)
+      console.log("[OrderPanel] Open position — raw form:", {
+        size: sizeNum,
+        margin: marginNum,
+        leverage,
+        side: finalSide,
+      });
+      console.log("[OrderPanel] Open position — intent sent to API:", {
+        size: intent.size,
+        collateral: intent.collateral,
+        leverage: intent.leverage,
+        isLong: intent.isLong,
+        isOpen: intent.isOpen,
+      });
+
       const result = await openPosition.mutateAsync({
         intent,
         poolKey: DEFAULT_POOL_KEY,
@@ -122,12 +137,14 @@ export function OrderPanelBox() {
           <input
             type="text"
             inputMode="decimal"
+            autoComplete="off"
             placeholder="0.00"
             value={size}
             onChange={(e) => setSize(e.target.value)}
-            className={`w-full border bg-[#2a303c] px-2 py-1.5 text-sm text-[#c8cdd4] placeholder:text-[#7d8590] ${
+            className={`w-full border bg-[#2a303c] px-2 py-1.5 text-sm text-[#c8cdd4] placeholder:text-[#7d8590] focus:outline-none focus:ring-1 focus:ring-[#5b6b7a] ${
               errors.size ? "border-[#b54a4a]" : "border-[#363d4a]"
             }`}
+            aria-label="Position size in base asset"
           />
           {errors.size && <p className="mt-0.5 text-xs text-[#b54a4a]">{errors.size}</p>}
         </div>
@@ -141,12 +158,14 @@ export function OrderPanelBox() {
           <input
             type="text"
             inputMode="decimal"
+            autoComplete="off"
             placeholder="0.00"
             value={margin}
             onChange={(e) => setMargin(e.target.value)}
-            className={`w-full border bg-[#2a303c] px-2 py-1.5 text-sm text-[#c8cdd4] placeholder:text-[#7d8590] ${
+            className={`w-full border bg-[#2a303c] px-2 py-1.5 text-sm text-[#c8cdd4] placeholder:text-[#7d8590] focus:outline-none focus:ring-1 focus:ring-[#5b6b7a] ${
               errors.margin ? "border-[#b54a4a]" : "border-[#363d4a]"
             }`}
+            aria-label="Margin (collateral) in USDC"
           />
           {errors.margin && <p className="mt-0.5 text-xs text-[#b54a4a]">{errors.margin}</p>}
         </div>

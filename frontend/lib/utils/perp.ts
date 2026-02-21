@@ -76,33 +76,37 @@ export function intentSizeAsMagnitude(size: string): string {
   return s;
 }
 
+/** Default price for collateral computation (match e2e script: scripts/zk/test-perp-e2e.js). */
+const DEFAULT_ENTRY_PRICE_18 = 2800;
+
 /**
  * Create a PerpIntent from form inputs.
  * LOCK: size is always sent as positive magnitude (uint256); isLong gives direction.
+ * Collateral is computed as (size × price) / leverage in 18 decimals (same as e2e script).
  */
 export function createPerpIntent(params: {
   userAddress: string;
   marketId: string;
-  size: number; // Position size (e.g., 1 ETH) — must be positive; direction from isLong
+  size: number; // Position size (e.g., 0.1 ETH) — must be positive; direction from isLong
   isLong: boolean;
   isOpen: boolean;
-  collateral?: number; // Required for opens
+  collateral?: number; // Ignored for opens; we use (size × price) / leverage to match contract/e2e
   leverage: number; // e.g., 5 for 5x
   nonce?: string;
   deadline?: string;
 }): PerpIntent {
-  // Lock: use absolute value so size is always magnitude; contract uses isLong for direction
   const sizeMagnitude = Math.abs(params.size);
   const sizeBigInt = priceToBigInt(sizeMagnitude);
 
-  // Contract expects collateral in 18 decimals (same as e2e script: collateralWei)
-  const collateral =
-    params.collateral !== undefined && params.collateral !== null
-      ? amountToBigInt(params.collateral, 18)
-      : "0";
-
-  // Leverage: ensure at least 1x (contract rejects 0)
   const leverageNum = Math.max(1, Number(params.leverage) || 1);
+  const leverageBigInt = leverageToBigInt(leverageNum);
+
+  // Match e2e: collateralWei = (size * ethers.parseEther("2800")) / leverage (18 decimals)
+  const sizeWei = BigInt(sizeBigInt);
+  const priceWei = BigInt(DEFAULT_ENTRY_PRICE_18) * 10n ** 18n;
+  const leverageWei = BigInt(leverageBigInt);
+  const collateralWei = leverageWei > 0n ? (sizeWei * priceWei) / leverageWei : 0n;
+  const collateral = collateralWei.toString();
 
   return {
     user: params.userAddress,
@@ -111,7 +115,7 @@ export function createPerpIntent(params: {
     isLong: params.isLong,
     isOpen: params.isOpen,
     collateral,
-    leverage: leverageToBigInt(leverageNum),
+    leverage: leverageBigInt,
     nonce: params.nonce || generateNonce(),
     deadline: params.deadline || generateDeadline(),
   };

@@ -51,14 +51,28 @@ export function NavbarBox() {
 
   return (
     <header className="flex h-14 shrink-0 items-center justify-between border-b border-[#363d4a] bg-[#21262e] px-4">
-      {/* Logo (left) */}
-      <div className="flex items-center gap-2">
+      {/* Logo + nav (left) */}
+      <div className="flex items-center gap-4">
         <Link href="/" className="flex items-center gap-2 font-semibold text-[#c8cdd4] hover:text-white">
           <span className="flex h-8 w-8 items-center justify-center bg-[#3d4a5c] text-sm font-bold text-white">
             z
           </span>
           <span className="hidden sm:inline">zkperps</span>
         </Link>
+        <nav className="flex gap-2">
+          <Link
+            href="/trade"
+            className="rounded px-2 py-1.5 text-sm text-[#7d8590] hover:bg-[#363d4a] hover:text-[#c8cdd4]"
+          >
+            Trade
+          </Link>
+          <Link
+            href="/execute"
+            className="rounded px-2 py-1.5 text-sm text-[#7d8590] hover:bg-[#363d4a] hover:text-[#c8cdd4]"
+          >
+            Execute
+          </Link>
+        </nav>
       </div>
 
       {/* Right: Trading account balance + Profile */}

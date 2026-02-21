@@ -1,7 +1,13 @@
 "use client";
 
 import { useState } from "react";
-import { usePosition, useClosePosition } from "@/hooks/usePositions";
+import {
+  usePosition,
+  useClosePosition,
+  useOrders,
+  useTradeHistory,
+  usePositionHistory,
+} from "@/hooks/usePositions";
 import { useAuth } from "@/lib/auth";
 import { DEFAULT_MARKET_ID, DEFAULT_POOL_KEY } from "@/lib/config";
 import {
@@ -11,12 +17,13 @@ import {
   leverageFromBigInt,
   createPerpIntent,
 } from "@/lib/utils/perp";
+import type { PerpOrderRecord, PerpTradeRecord } from "@/lib/api/perp";
 
 type TabId = "positions" | "open-orders" | "position-history" | "historical-pnl" | "order-history" | "trade-history";
 
 const TABS: { id: TabId; label: string; count?: number }[] = [
-  { id: "positions", label: "Positions", count: 0 },
-  { id: "open-orders", label: "Open Orders", count: 0 },
+  { id: "positions", label: "Positions" },
+  { id: "open-orders", label: "Open Orders" },
   { id: "position-history", label: "Position History" },
   { id: "historical-pnl", label: "Historical P&L" },
   { id: "order-history", label: "Order History" },
@@ -24,6 +31,144 @@ const TABS: { id: TabId; label: string; count?: number }[] = [
 ];
 
 type MarginMode = "isolated" | "cross";
+
+function OrdersTable({
+  orders,
+  isLoading,
+  showStatus = false,
+}: {
+  orders: PerpOrderRecord[];
+  isLoading: boolean;
+  showStatus?: boolean;
+}) {
+  return (
+    <div className="min-h-0 flex-1 overflow-auto overflow-x-auto">
+      <table className="w-full min-w-[600px] border-collapse text-xs">
+        <thead className="sticky top-0 z-10 bg-[#21262e]">
+          <tr className="border-b border-[#363d4a] text-[#7d8590]">
+            <th className="py-2 pl-2 text-left font-medium uppercase tracking-wide">Time</th>
+            <th className="py-2 text-left font-medium uppercase tracking-wide">Symbol</th>
+            <th className="py-2 text-right font-medium uppercase tracking-wide">Side</th>
+            <th className="py-2 text-right font-medium uppercase tracking-wide">Size</th>
+            <th className="py-2 text-right font-medium uppercase tracking-wide">Leverage</th>
+            <th className="py-2 text-right font-medium uppercase tracking-wide">Margin</th>
+            {showStatus && <th className="py-2 pr-2 text-right font-medium uppercase tracking-wide">Status</th>}
+          </tr>
+        </thead>
+        <tbody>
+          {isLoading ? (
+            <tr>
+              <td colSpan={showStatus ? 7 : 6} className="py-8 text-center text-[#7d8590]">
+                Loading...
+              </td>
+            </tr>
+          ) : orders.length === 0 ? (
+            <tr>
+              <td colSpan={showStatus ? 7 : 6} className="py-8 text-center text-[#7d8590]">
+                No orders
+              </td>
+            </tr>
+          ) : (
+            orders.map((o) => (
+              <tr key={o.commitmentHash} className="border-b border-[#363d4a] hover:bg-[#2a303c]">
+                <td className="py-2 pl-2 text-[#c8cdd4]">{formatOrderDate(o.createdAt)}</td>
+                <td className="py-2 text-[#c8cdd4]">ETHUSD</td>
+                <td className="py-2 text-right">
+                  <span className={o.isLong ? "text-[#4a9b6e]" : "text-[#c75a5a]"}>
+                    {o.isLong ? "Long" : "Short"} {o.isOpen ? "Open" : "Close"}
+                  </span>
+                </td>
+                <td className="py-2 text-right text-[#c8cdd4]">{formatPositionSize(o.size)}</td>
+                <td className="py-2 text-right text-[#c8cdd4]">{leverageFromBigInt(o.leverage)}x</td>
+                <td className="py-2 text-right text-[#c8cdd4]">
+                  ${amountFromBigInt(o.collateral, 18).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                </td>
+                {showStatus && (
+                  <td className="py-2 pr-2 text-right">
+                    <span
+                      className={
+                        o.status === "pending"
+                          ? "text-amber-400"
+                          : o.status === "executed"
+                            ? "text-[#4a9b6e]"
+                            : "text-[#7d8590]"
+                      }
+                    >
+                      {o.status}
+                    </span>
+                  </td>
+                )}
+              </tr>
+            ))
+          )}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function TradesTable({ trades, isLoading }: { trades: PerpTradeRecord[]; isLoading: boolean }) {
+  return (
+    <div className="min-h-0 flex-1 overflow-auto overflow-x-auto">
+      <table className="w-full min-w-[600px] border-collapse text-xs">
+        <thead className="sticky top-0 z-10 bg-[#21262e]">
+          <tr className="border-b border-[#363d4a] text-[#7d8590]">
+            <th className="py-2 pl-2 text-left font-medium uppercase tracking-wide">Time</th>
+            <th className="py-2 text-left font-medium uppercase tracking-wide">Symbol</th>
+            <th className="py-2 text-right font-medium uppercase tracking-wide">Side</th>
+            <th className="py-2 text-right font-medium uppercase tracking-wide">Size</th>
+            <th className="py-2 text-right font-medium uppercase tracking-wide">Entry</th>
+            <th className="py-2 text-right font-medium uppercase tracking-wide">Tx</th>
+          </tr>
+        </thead>
+        <tbody>
+          {isLoading ? (
+            <tr>
+              <td colSpan={6} className="py-8 text-center text-[#7d8590]">
+                Loading...
+              </td>
+            </tr>
+          ) : trades.length === 0 ? (
+            <tr>
+              <td colSpan={6} className="py-8 text-center text-[#7d8590]">
+                No trades
+              </td>
+            </tr>
+          ) : (
+            trades.map((t) => (
+              <tr key={t.commitmentHash + t.executedAt} className="border-b border-[#363d4a] hover:bg-[#2a303c]">
+                <td className="py-2 pl-2 text-[#c8cdd4]">{formatOrderDate(t.executedAt)}</td>
+                <td className="py-2 text-[#c8cdd4]">ETHUSD</td>
+                <td className="py-2 text-right">
+                  <span className={t.isLong ? "text-[#4a9b6e]" : "text-[#c75a5a]"}>
+                    {t.isLong ? "Long" : "Short"} {t.isOpen ? "Open" : "Close"}
+                  </span>
+                </td>
+                <td className="py-2 text-right text-[#c8cdd4]">{formatPositionSize(t.size)}</td>
+                <td className="py-2 text-right text-[#c8cdd4]">
+                  {t.entryPrice
+                    ? `$${priceFromBigInt(t.entryPrice).toLocaleString(undefined, { minimumFractionDigits: 2 })}`
+                    : "—"}
+                </td>
+                <td className="py-2 pr-2 text-right">
+                  <a
+                    href={`https://sepolia.arbiscan.io/tx/${t.txHash}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-[#5b6b7a] hover:text-[#c8cdd4] truncate max-w-[80px] inline-block"
+                    title={t.txHash}
+                  >
+                    {t.txHash.slice(0, 10)}…
+                  </a>
+                </td>
+              </tr>
+            ))
+          )}
+        </tbody>
+      </table>
+    </div>
+  );
+}
 
 interface DisplayPosition {
   symbol: string;
@@ -44,11 +189,29 @@ interface DisplayPosition {
   tpSlValue?: string;
 }
 
+function formatOrderDate(iso: string): string {
+  try {
+    const d = new Date(iso);
+    return d.toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" });
+  } catch {
+    return iso;
+  }
+}
+
 export function PositionsPanelBox() {
   const { user, isAuthenticated } = useAuth();
   const { data: positionData, isLoading } = usePosition(DEFAULT_MARKET_ID);
   const closePosition = useClosePosition();
-  
+  const { data: ordersData, isLoading: ordersLoading } = useOrders("pending");
+  const { data: orderHistoryData, isLoading: orderHistoryLoading } = useOrders("all");
+  const { data: tradeHistoryData, isLoading: tradeHistoryLoading } = useTradeHistory(50);
+  const { data: positionHistoryData, isLoading: positionHistoryLoading } = usePositionHistory({ limit: 50 });
+
+  const openOrders = ordersData?.orders ?? [];
+  const orderHistory = orderHistoryData?.orders ?? [];
+  const tradeHistory = tradeHistoryData?.trades ?? [];
+  const positionHistoryTrades = positionHistoryData?.trades ?? [];
+
   const [activeTab, setActiveTab] = useState<TabId>("positions");
   const [allMarkets, setAllMarkets] = useState(true);
 
@@ -144,13 +307,22 @@ export function PositionsPanelBox() {
               }`}
             >
               {tab.label}
-              {tab.count !== undefined && (
+              {tab.id === "positions" && (
                 <span
                   className={`border px-1.5 py-0.5 text-[10px] ${
                     activeTab === tab.id ? "border-[#363d4a] bg-[#2a303c] text-[#c8cdd4]" : "border-[#363d4a] text-[#7d8590]"
                   }`}
                 >
-                  {activeTab === "positions" ? positions.length : tab.count}
+                  {positions.length}
+                </span>
+              )}
+              {tab.id === "open-orders" && (
+                <span
+                  className={`border px-1.5 py-0.5 text-[10px] ${
+                    activeTab === tab.id ? "border-[#363d4a] bg-[#2a303c] text-[#c8cdd4]" : "border-[#363d4a] text-[#7d8590]"
+                  }`}
+                >
+                  {openOrders.length}
                 </span>
               )}
             </button>
@@ -278,14 +450,30 @@ export function PositionsPanelBox() {
         </div>
       )}
 
-      {/* Placeholder for other tabs */}
-      {activeTab !== "positions" && (
+      {/* Open Orders */}
+      {activeTab === "open-orders" && (
+        <OrdersTable orders={openOrders} isLoading={ordersLoading} />
+      )}
+
+      {/* Order History */}
+      {activeTab === "order-history" && (
+        <OrdersTable orders={orderHistory} isLoading={orderHistoryLoading} showStatus />
+      )}
+
+      {/* Trade History */}
+      {activeTab === "trade-history" && (
+        <TradesTable trades={tradeHistory} isLoading={tradeHistoryLoading} />
+      )}
+
+      {/* Position History */}
+      {activeTab === "position-history" && (
+        <TradesTable trades={positionHistoryTrades} isLoading={positionHistoryLoading} />
+      )}
+
+      {/* Historical P&L placeholder */}
+      {activeTab === "historical-pnl" && (
         <div className="flex flex-1 items-center justify-center p-4 text-xs text-[#7d8590]">
-          {activeTab === "open-orders" && "Open orders will appear here."}
-          {activeTab === "position-history" && "Position history will appear here."}
-          {activeTab === "historical-pnl" && "Historical P&L will appear here."}
-          {activeTab === "order-history" && "Order history will appear here."}
-          {activeTab === "trade-history" && "Trade history will appear here."}
+          Historical P&L will appear here.
         </div>
       )}
     </section>

@@ -107,6 +107,10 @@ contract SetupPoolLiquidity is Script {
             console.log("Pool already initialized, skipping...");
         }
 
+        // Re-read slot0 so we use the pool's actual current price for liquidity (avoids zero in-range liquidity)
+        (uint160 currentSqrtPriceX96, int24 currentTick,,) = StateLibrary.getSlot0(poolManager, poolId);
+        require(currentSqrtPriceX96 != 0, "Pool slot0 price is zero");
+
         // Step 2: Approve tokens via Permit2
         console.log("\n=== Step 2: Approving Tokens via Permit2 ===");
         IERC20 token0 = IERC20(currency0);
@@ -126,25 +130,26 @@ contract SetupPoolLiquidity is Script {
         permit2.approve(currency1, positionManagerAddr, type(uint160).max, type(uint48).max);
         console.log("Tokens approved to Permit2 and PositionManager");
 
-        // Step 3: Calculate liquidity
+        // Step 3: Calculate liquidity using pool's current price; range must contain current tick to avoid div-by-zero on swap
         console.log("\n=== Step 3: Calculating Liquidity ===");
-        int24 tickLower = -60;
-        int24 tickUpper = 60;
-        
-        // Use initial price (2^96 = 1:1 price) - pool was initialized with this
-        uint160 initialSqrtPriceX96 = uint160(79228162514264337593543950336);
-        
+        // Align range to TICK_SPACING and center around current tick so liquidity is in-range
+        int24 tickLower = (currentTick / TICK_SPACING) * TICK_SPACING - TICK_SPACING;
+        int24 tickUpper = (currentTick / TICK_SPACING) * TICK_SPACING + TICK_SPACING;
+        require(tickLower < tickUpper, "Tick range invalid (lower >= upper)");
+
         uint160 sqrtPriceAx96 = TickMath.getSqrtPriceAtTick(tickLower);
         uint160 sqrtPriceBx96 = TickMath.getSqrtPriceAtTick(tickUpper);
-        
+
         uint128 liquidity = LiquidityAmounts.getLiquidityForAmounts(
-            initialSqrtPriceX96,
+            currentSqrtPriceX96,
             sqrtPriceAx96,
             sqrtPriceBx96,
             AMOUNT0_DESIRED,
             AMOUNT1_DESIRED
         );
-        
+        require(liquidity > 0, "Calculated liquidity is zero; check amounts and that current price is inside [tickLower, tickUpper]");
+
+        console.log("Current tick:", currentTick);
         console.log("Tick range:");
         console.log("  tickLower:", tickLower);
         console.log("  tickUpper:", tickUpper);

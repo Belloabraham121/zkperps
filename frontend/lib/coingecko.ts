@@ -1,6 +1,6 @@
-import type { CandlestickData, HistogramData, UTCTimestamp } from "lightweight-charts";
+import type { OHLCPoint, VolumePoint } from "./chart-data";
 
-/** Demo API (and free) use this base. Pro API uses pro-api.coingecko.com. */
+/** Demo API (and free) use this base. */
 const COINGECKO_BASE = "https://api.coingecko.com/api/v3";
 
 /** CoinGecko OHLC item: [timestamp_ms, open, high, low, close] */
@@ -17,7 +17,6 @@ function getHeaders(): HeadersInit {
 
 /**
  * Fetch ETH/USD OHLC from CoinGecko.
- * days: 1, 7, 14, 30, 90, 180 (free API); Pro can use more.
  */
 export async function fetchEthUsdOhlc(days: number): Promise<CoinGeckoOhlcItem[]> {
   const url = `${COINGECKO_BASE}/coins/ethereum/ohlc?vs_currency=usd&days=${days}`;
@@ -31,27 +30,20 @@ export async function fetchEthUsdOhlc(days: number): Promise<CoinGeckoOhlcItem[]
 }
 
 /**
- * Convert CoinGecko OHLC to lightweight-charts candlestick + volume (volume not in OHLC, use placeholder).
+ * Convert CoinGecko OHLC to generic points (no volume in API).
  */
-export function coingeckoOhlcToChart(
-  raw: CoinGeckoOhlcItem[]
-): { candles: CandlestickData<UTCTimestamp>[]; volume: HistogramData<UTCTimestamp>[] } {
-  const candles: CandlestickData<UTCTimestamp>[] = [];
-  const volume: HistogramData<UTCTimestamp>[] = [];
+export function coingeckoOhlcToChart(raw: CoinGeckoOhlcItem[]): { points: OHLCPoint[]; volume: VolumePoint[] } {
+  const points: OHLCPoint[] = [];
+  const volume: VolumePoint[] = [];
   for (const [tsMs, open, high, low, close] of raw) {
-    const time = Math.floor(tsMs / 1000) as UTCTimestamp;
-    candles.push({ time, open, high, low, close });
-    const isUp = close >= open;
-    volume.push({
-      time,
-      value: 0,
-      color: isUp ? "rgba(38, 166, 154, 0.5)" : "rgba(239, 83, 80, 0.5)",
-    });
+    const time = Math.floor(tsMs / 1000);
+    points.push({ time, open, high, low, close });
+    volume.push({ time, value: 0 });
   }
-  return { candles, volume };
+  return { points, volume };
 }
 
-/** Map UI timeframe to CoinGecko days (for ETH/USD perp chart). */
+/** Map UI timeframe to CoinGecko days. */
 export const TIMEFRAME_TO_DAYS: Record<string, number> = {
   "1M": 1,
   "15M": 1,

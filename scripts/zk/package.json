@@ -9,6 +9,7 @@
     "test": "node test-proof-generation.js",
     "test-e2e": "node test-end-to-end-zk-flow.js",
     "test-perp-e2e": "node test-perp-e2e.js",
+    "execute-perp-batch": "node execute-perp-batch-from-mongo.js",
     "setup-pool": "node setup-pool-liquidity.js"
   },
   "dependencies": {
@@ -16,6 +17,7 @@
     "circomlibjs": "^0.1.7",
     "dotenv": "^16.6.1",
     "ethers": "^6.16.0",
+    "mongodb": "^6.0.0",
     "snarkjs": "^0.7.0"
   },
   "keywords": [

@@ -1,15 +1,15 @@
 #!/usr/bin/env node
 
 /**
- * Perp flow end-to-end test
+ * Perp flow: commit + reveal only (no batch execution).
  *
  * 1. Deposit margin (approve USDC, PerpPositionManager.depositCollateral)
  * 2. Build PerpIntent and get commitment hash (hook.computePerpCommitmentHash)
  * 3. Submit perp commitment (hook.submitPerpCommitment)
  * 4. Submit perp reveal (hook.submitPerpReveal)
- * 5. Wait BATCH_INTERVAL (5 min) then revealAndBatchExecutePerps
- *     (Script funds the Hook with quote (USDC) so it can settle the perp swap; the Hook holds no tokens by default.)
- * 6. Verify position on PerpPositionManager
+ *
+ * Batch execution is done separately: run execute-perp-batch-from-mongo.js
+ * to read pending commits from MongoDB and call revealAndBatchExecutePerps.
  *
  * Usage:
  *   node test-perp-e2e.js
@@ -17,11 +17,9 @@
  * Env:
  *   PRIVATE_KEY, RPC_URL (or ARBITRUM_SEPOLIA_RPC_URL)
  *   HOOK_ADDRESS, PERP_MANAGER_ADDRESS, MOCK_USDC, MOCK_USDT (optional)
- *   On Arbitrum Sepolia (chainId 421614) the script uses DEPLOYED addresses and ignores env
- *   so RPC_URL must point to Arbitrum Sepolia when testing that deployment.
+ *   On Arbitrum Sepolia (chainId 421614) the script uses DEPLOYED addresses.
  *   MARKET_ID (e.g. 0x0000000000000000000000000000000000000001 for ETH)
  *   BASE_IS_CURRENCY0 (optional, default true) — base asset is currency0
- *   SKIP_WAIT (optional) — if set, skip 5 min wait and only do commit+reveal (run again later to execute)
  */
 
 const { ethers } = require("ethers");
@@ -69,10 +67,6 @@ const MOCK_USDT =
 const MARKET_ID =
   process.env.MARKET_ID || "0x0000000000000000000000000000000000000001";
 const BASE_IS_CURRENCY0 = process.env.BASE_IS_CURRENCY0 !== "false";
-const SKIP_WAIT =
-  process.env.SKIP_WAIT === "true" || process.env.SKIP_WAIT === "1";
-
-const BATCH_INTERVAL_SEC = 5 * 60;
 
 const HOOK_ABI = [
   "function submitPerpCommitment(tuple(address currency0, address currency1, uint24 fee, int24 tickSpacing, address hooks) key, bytes32 commitmentHash)",
@@ -382,261 +376,10 @@ async function main() {
   await reveal2Tx.wait();
   console.log("  Reveal 2:", reveal2Tx.hash);
 
-  if (SKIP_WAIT) {
-    console.log("\n--- SKIP_WAIT set: skipping batch execution. ---");
-    console.log(
-      "  Wait",
-      BATCH_INTERVAL_SEC,
-      "seconds then run again without SKIP_WAIT to execute, or call:",
-    );
-    console.log(
-      "  hook.revealAndBatchExecutePerps(poolKey, [hash1, hash2], " +
-        BASE_IS_CURRENCY0 +
-        ")",
-    );
-    return;
-  }
-
-  // 5. Wait for batch interval
-  const batchInterval = await hook
-    .BATCH_INTERVAL()
-    .catch(() => BigInt(BATCH_INTERVAL_SEC));
-  console.log("\n--- 5. Wait batch interval ---");
-  console.log("  Waiting", Number(batchInterval), "seconds...");
-  await new Promise((r) => setTimeout(r, Number(batchInterval) * 1000));
-
-  // 5.5 Fetch and log Chainlink oracle price
-  console.log("\n--- Fetch Chainlink Oracle Price ---");
-  let oraclePrice18d;
-  try {
-    oraclePrice18d = await oracleAdapter.getPriceWithFallback(MARKET_ID);
-    const oraclePriceUsd = ethers.formatEther(oraclePrice18d);
-    console.log("  Chainlink oracle price:", oraclePriceUsd, "USD per base");
-    console.log("  Market ID:", MARKET_ID);
-    console.log("  Oracle adapter:", DEPLOYED.CHAINLINK_ORACLE_ADAPTER);
-  } catch (e) {
-    console.error(
-      "  Error: Failed to fetch Chainlink oracle price:",
-      e.message || e.shortMessage,
-    );
-    console.error("  Oracle adapter:", DEPLOYED.CHAINLINK_ORACLE_ADAPTER);
-    console.error("  Market ID:", MARKET_ID);
-    throw new Error(
-      "Oracle price fetch failed - cannot proceed without oracle data",
-    );
-  }
-
-  // 5.6 Fund Hook with quote so it can settle the perp swap
-  // The Hook executes the net swap and must transfer quote to the pool; it holds no tokens by default.
-  // Calculate required quote: sum of all intent sizes * fixed price estimate * slippage buffer
-  // NOTE: Using a fixed price estimate for funding (not oracle price) to ensure consistent behavior
-  const quoteCurrency = BASE_IS_CURRENCY0 ? currency1 : currency0;
-  const quoteToken =
-    quoteCurrency.toLowerCase() === usdcAddr.toLowerCase() ? usdc : usdt;
-  const quoteDec =
-    quoteCurrency.toLowerCase() === usdcAddr.toLowerCase() ? usdcDec : 6;
-
-  // Calculate net base size from intents (sum all sizes, accounting for direction)
-  // For now, we know both intents are long opens with same size
-  const totalBaseSize = size * BigInt(commitmentHashes.length); // Both are long, so net = sum
-
-  // Use a fixed price estimate for funding calculation (not oracle price)
-  // This ensures funding is predictable regardless of oracle price fluctuations
-  const fundingPriceEstimate18d = ethers.parseEther("2500"); // Fixed estimate for funding
-
-  // Estimate quote needed: base size (in 18d) * price estimate (in 18d) * buffer / 1e36 * quote decimals
-  // bufferMultiplier accounts for slippage, fees, and price movement
-  // Formula: (totalBaseSize / 1e18) * (fundingPriceEstimate18d / 1e18) * buffer * 1e6
-  // Simplified: (totalBaseSize * fundingPriceEstimate18d * buffer * 1e6) / 1e36
-  // NOTE: Pool price may differ significantly from oracle price, especially with low liquidity
-  // Using a large buffer (10x) to ensure sufficient funds for the swap
-  const bufferMultiplier = 10n; // 10x buffer to account for pool price differences, slippage, fees, and low liquidity
-  const quoteDecMultiplier = 10n ** BigInt(quoteDec);
-  const oneEther = ethers.parseEther("1"); // 1e18
-
-  // Fix: Divide by 1e36 (1e18 * 1e18) since both totalBaseSize and fundingPriceEstimate18d are in 18 decimals
-  // Formula breakdown:
-  // - totalBaseSize is in 18 decimals (wei): 0.2 ETH = 0.2e18
-  // - fundingPriceEstimate18d is in 18 decimals: $2500 = 2500e18
-  // - We want: (0.2 ETH * $2500 * 10 buffer) in USDC (6 decimals)
-  // - = (0.2e18 / 1e18) * (2500e18 / 1e18) * 10 * 1e6
-  // - = (0.2e18 * 2500e18 * 10 * 1e6) / (1e18 * 1e18)
-  // - = (0.2 * 2500 * 10 * 1e6) = 5,000,000 (6 decimals) = 5000 USDC
-  const numerator =
-    totalBaseSize *
-    fundingPriceEstimate18d *
-    bufferMultiplier *
-    quoteDecMultiplier;
-  const denominator = oneEther * oneEther; // 1e36
-  const hookQuoteNeeded = numerator / denominator;
-
-  let hookQuoteBalanceBefore = 0n;
-  try {
-    hookQuoteBalanceBefore = await quoteToken.balanceOf(hookAddr);
-  } catch (_) {}
-
-  if (hookQuoteBalanceBefore < hookQuoteNeeded) {
-    const toTransfer = hookQuoteNeeded - hookQuoteBalanceBefore;
-    const signerQuoteBalance = await quoteToken.balanceOf(signer.address);
-    if (signerQuoteBalance < toTransfer) {
-      console.error(
-        "  Error: signer quote balance",
-        ethers.formatUnits(signerQuoteBalance, quoteDec),
-        "<",
-        ethers.formatUnits(toTransfer, quoteDec),
-        "needed to fund Hook for batch.",
-      );
-      console.error(
-        "  Estimated from",
-        commitmentHashes.length,
-        "intents with total base size",
-        ethers.formatEther(totalBaseSize),
-        "ETH",
-      );
-      process.exit(1);
-    }
-    const fundTx = await quoteToken.transfer(hookAddr, toTransfer);
-    await fundTx.wait();
-    const hookQuoteBalanceAfter = await quoteToken.balanceOf(hookAddr);
-
-    console.log("\n--- Fund Hook (quote for batch) ---");
-    console.log(
-      "  Total base size:",
-      ethers.formatEther(totalBaseSize),
-      "base units",
-    );
-    console.log(
-      "  Funding price estimate:",
-      ethers.formatEther(fundingPriceEstimate18d),
-      "USD per base (fixed estimate, not oracle)",
-    );
-    console.log(
-      "  Estimated quote needed:",
-      ethers.formatUnits(hookQuoteNeeded, quoteDec),
-      "(10x buffer for pool price differences, slippage, fees)",
-    );
-    console.log(
-      "  Hook balance before:",
-      ethers.formatUnits(hookQuoteBalanceBefore, quoteDec),
-    );
-    console.log(
-      "  Transferred",
-      ethers.formatUnits(toTransfer, quoteDec),
-      "quote to Hook",
-    );
-    console.log(
-      "  Hook balance after:",
-      ethers.formatUnits(hookQuoteBalanceAfter, quoteDec),
-    );
-  } else {
-    console.log("\n--- Fund Hook (quote for batch) ---");
-    console.log(
-      "  Hook already has sufficient quote:",
-      ethers.formatUnits(hookQuoteBalanceBefore, quoteDec),
-    );
-  }
-
-  // 6. Execute batch
-  console.log("\n--- 6. revealAndBatchExecutePerps ---");
-  // Check if perpPositionManager is set (declare outside try so it's accessible in catch)
-  let perpManagerAddr;
-  try {
-    perpManagerAddr = await hook.perpPositionManager();
-  } catch (e) {
-    console.error("  Error: Failed to read perpPositionManager:", e.message);
-    process.exit(1);
-  }
-  
-  if (!perpManagerAddr || perpManagerAddr === ethers.ZeroAddress) {
-    console.error("  Error: perpPositionManager is not set on Hook!");
-    console.error("  Hook:", hookAddr);
-    console.error("  Run: forge script script/SetPerpManager.s.sol:SetPerpManager --rpc-url arbitrum_sepolia --broadcast");
-    process.exit(1);
-  }
-  
-  console.log("  Verified perpPositionManager is set:", perpManagerAddr);
-  
-  try {
-    const execTx = await hook.revealAndBatchExecutePerps(
-      poolKey,
-      commitmentHashes,
-      BASE_IS_CURRENCY0,
-    );
-    await execTx.wait();
-    console.log("  Tx:", execTx.hash);
-  } catch (e) {
-    // Decode known error selectors
-    const errorSelector = e.data && e.data.length >= 10 ? e.data.substring(0, 10) : null;
-    const errorMap = {
-      "0xbf611a9d": "PerpManagerNotSet",
-      "0x7c9c6e8f": "PriceLimitAlreadyExceeded",
-      "0xdf239ca8": "PerpCommitmentAlreadyRevealed",
-      "0xfe3f0ca4": "InvalidPerpCommitment",
-      "0x1f2a2005": "DeadlineExpired",
-      "0x2d4e4f9d": "InvalidNonce",
-      "0x8c2e2b3a": "InsufficientCommitments",
-      "0x4e8e5c5c": "BatchConditionsNotMet",
-      "0x7fb6be02": "OnlyExecutor",
-    };
-    
-    const decodedError = errorSelector && errorMap[errorSelector] ? errorMap[errorSelector] : null;
-
-    console.error("  Execute failed:", e.message || e.shortMessage);
-    
-    // Decode error selector (reuse errorSelector from above)
-    if (errorSelector && errorSelector !== "none" && decodedError !== "UnknownError") {
-      console.error("  Decoded error:", decodedError);
-    }
-    
-    if ((e.reason || e.message || "").includes("insufficient balance")) {
-      console.error(
-        "  The Hook must hold enough quote to settle the swap; the script funds it in step 5.5. If you still see this, increase the signer's quote balance or the hookQuoteNeeded amount.",
-      );
-    }
-    if (e.data) {
-      console.error("  Data:", e.data);
-      if (e.data.startsWith("0x7c9c6e8f")) {
-        console.error(
-          "  Error: PriceLimitAlreadyExceeded - This suggests the Hook contract may not have the price limit fix, or pool price is at an extreme.",
-        );
-        console.error(
-          "  Expected Hook (with fix): 0xf31d8e462185bd0a7eedece7f5cecc7048e700c4",
-        );
-        console.error("  Current Hook:", hookAddr);
-      } else if (e.data.startsWith("0xfe3f0ca4")) {
-        console.error("  Error: InvalidPerpCommitment - Reveal not found or commitment invalid");
-        console.error("  Check that reveals were submitted before batch execution");
-      } else if (e.data.startsWith("0xdf239ca8")) {
-        console.error("  Error: PerpCommitmentAlreadyRevealed - Commitment was already revealed");
-      } else if (e.data.startsWith("0x4e8e5c5c")) {
-        console.error("  Error: BatchConditionsNotMet - Batch interval not met");
-        console.error("  Wait 5 minutes between batch executions");
-      } else if (e.data.startsWith("0x1f2a2005")) {
-        console.error("  Error: DeadlineExpired - Intent deadline has passed");
-      } else if (e.data.startsWith("0x2d4e4f9d")) {
-        console.error("  Error: InvalidNonce - Nonce already used");
-      } else if (e.data.startsWith("0x8c2e2b3a")) {
-        console.error("  Error: InsufficientCommitments - Need at least 2 commitments");
-      } else if (e.data.startsWith("0x7fb6be02")) {
-        console.error("  Error: OnlyExecutor - Hook is not set as executor on PerpPositionManager");
-        console.error("  Run: cd contracts && source .env && export PERP_POSITION_MANAGER=0xf3c9cdbaf6dc303fe302fbf81465de0a057ccf5e && forge script script/SetExecutorOnPerpManager.s.sol:SetExecutorOnPerpManager --rpc-url arbitrum_sepolia --broadcast");
-      }
-    }
-    process.exit(1);
-  }
-
-  // 7. Verify position
-  console.log("\n--- 7. Verify position ---");
-  const position = await perpManager.getPosition(signer.address, MARKET_ID);
-  const available = await perpManager.getAvailableMargin(signer.address);
-  console.log("  Position size:", position[0].toString());
-  console.log("  Entry price:", position[1].toString());
-  console.log("  Collateral in position:", position[2].toString());
-  console.log("  Leverage:", position[3].toString());
-  console.log("  Available margin:", available.toString());
-
   console.log("\n" + "=".repeat(60));
-  console.log("Perp e2e test done.");
+  console.log("Commit + reveal done. To execute the batch using commits from MongoDB, run:");
+  console.log("  node execute-perp-batch-from-mongo.js");
+  console.log("=".repeat(60));
 }
 
 main().catch((e) => {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
@@ -21,7 +21,7 @@ export function AccountSummaryBox() {
   const [accountLabel] = useState("Trading Account");
   const [depositModalOpen, setDepositModalOpen] = useState(false);
   const [depositPending, setDepositPending] = useState(false);
-  const depositInputRef = useRef<HTMLInputElement>(null);
+  const [depositAmount, setDepositAmount] = useState("");
 
   const { token, isAuthenticated } = useAuth();
   const queryClient = useQueryClient();
@@ -47,24 +47,15 @@ export function AccountSummaryBox() {
     setDepositModalOpen(true);
   };
 
-  // Focus and clear input when modal opens (after portal has mounted)
+  // Clear amount when modal opens
   useEffect(() => {
-    if (depositModalOpen) {
-      const t = setTimeout(() => {
-        const el = depositInputRef.current;
-        if (el) {
-          el.value = "";
-          el.focus();
-        }
-      }, 50);
-      return () => clearTimeout(t);
-    }
+    if (depositModalOpen) setDepositAmount("");
   }, [depositModalOpen]);
 
   const handleDepositSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!token) return;
-    const raw = depositInputRef.current?.value?.trim() ?? "";
+    const raw = depositAmount.trim();
     const num = parseFloat(raw);
     if (raw === "" || Number.isNaN(num) || num <= 0) {
       toast.error("Enter a valid amount (e.g. 100 for 100 USDC)");
@@ -74,7 +65,7 @@ export function AccountSummaryBox() {
     try {
       const result = await perpApi.depositCollateral(num, token);
       setDepositModalOpen(false);
-      if (depositInputRef.current) depositInputRef.current.value = "";
+      setDepositAmount("");
       queryClient.invalidateQueries({ queryKey: ["collateral"] });
       queryClient.invalidateQueries({ queryKey: ["balances"] });
       toast.success("Deposit successful", {
@@ -119,12 +110,13 @@ export function AccountSummaryBox() {
       {depositModalOpen && typeof document !== "undefined" &&
         createPortal(
           <div
-            className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4 pointer-events-none"
+            className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4"
             role="dialog"
             aria-modal="true"
+            onClick={() => !depositPending && setDepositModalOpen(false)}
           >
             <div
-              className="w-full max-w-sm rounded-lg border border-[#363d4a] bg-[#21262e] p-4 shadow-xl pointer-events-auto"
+              className="relative z-[101] w-full max-w-sm rounded-lg border border-[#363d4a] bg-[#21262e] p-4 shadow-xl"
               onClick={(e) => e.stopPropagation()}
             >
               <div className="mb-3 flex items-center justify-between">
@@ -146,11 +138,12 @@ export function AccountSummaryBox() {
               </p>
               <form onSubmit={handleDepositSubmit} className="flex flex-col gap-3">
                 <input
-                  ref={depositInputRef}
                   type="text"
                   inputMode="decimal"
+                  autoComplete="off"
                   placeholder="0.00"
-                  defaultValue=""
+                  value={depositAmount}
+                  onChange={(e) => setDepositAmount(e.target.value)}
                   className="w-full border border-[#363d4a] bg-[#2a303c] px-3 py-2 text-sm text-[#c8cdd4] placeholder:text-[#7d8590] focus:outline-none focus:ring-2 focus:ring-[#5b6b7a]"
                   disabled={depositPending}
                   aria-label="Deposit amount in USDC"

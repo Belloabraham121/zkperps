@@ -19,6 +19,16 @@ const ERC20_ABI = [
     ],
     outputs: [{ type: "bool" }],
   },
+  {
+    name: "transfer",
+    type: "function",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "to", type: "address" },
+      { name: "amount", type: "uint256" },
+    ],
+    outputs: [{ type: "bool" }],
+  },
 ] as const;
 
 const PERP_MANAGER_ABI = [
@@ -154,6 +164,21 @@ export function encodeUsdcApprove(
     abi: ERC20_ABI,
     functionName: "approve",
     args: [spender, amount],
+  });
+}
+
+/**
+ * Encode ERC20 transfer(to, amount) for use in sendTransaction.
+ * Used to fund the Hook with quote so it can settle the perp swap (see scripts/zk/test-perp-e2e.js step 5.6).
+ */
+export function encodeErc20Transfer(
+  to: `0x${string}`,
+  amount: bigint,
+): `0x${string}` {
+  return encodeFunctionData({
+    abi: ERC20_ABI,
+    functionName: "transfer",
+    args: [to, amount],
   });
 }
 

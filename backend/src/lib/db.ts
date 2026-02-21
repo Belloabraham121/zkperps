@@ -43,6 +43,11 @@ export async function connectDB(): Promise<Db> {
     await db.collection<UserWallet>("userWallets").createIndex({ privyUserId: 1 }, { unique: true });
     await db.collection<UserWallet>("userWallets").createIndex({ walletAddress: 1 });
     await db.collection<PendingPerpReveal>("pendingPerpReveals").createIndex({ poolId: 1, createdAt: 1 });
+    await db.collection<PerpOrder>("perpOrders").createIndex({ commitmentHash: 1 }, { unique: true });
+    await db.collection<PerpOrder>("perpOrders").createIndex({ privyUserId: 1, status: 1, createdAt: -1 });
+    await db.collection<PerpOrder>("perpOrders").createIndex({ walletAddress: 1, status: 1, createdAt: -1 });
+    await db.collection<PerpTrade>("perpTrades").createIndex({ privyUserId: 1, executedAt: -1 });
+    await db.collection<PerpTrade>("perpTrades").createIndex({ walletAddress: 1, executedAt: -1 });
     
     return db;
   } catch (error) {
@@ -90,6 +95,67 @@ export interface PendingPerpReveal {
  */
 export function getPendingPerpRevealsCollection(): Collection<PendingPerpReveal> {
   return getDB().collection<PendingPerpReveal>("pendingPerpReveals");
+}
+
+/** Order status */
+export type OrderStatus = "pending" | "executed" | "cancelled";
+
+/**
+ * Perp order: user's intent (size, leverage, margin, long/short) saved when they reveal.
+ * Used for open orders list and to create Trade when batch executes.
+ */
+export interface PerpOrder {
+  privyUserId: string;
+  walletAddress: string;
+  poolId: string;
+  commitmentHash: string;
+  market: string;
+  size: string;
+  isLong: boolean;
+  isOpen: boolean;
+  collateral: string;
+  leverage: string;
+  nonce: string;
+  deadline: string;
+  status: OrderStatus;
+  createdAt: Date;
+  updatedAt: Date;
+  executedAt?: Date;
+  txHash?: string;
+}
+
+/**
+ * Get perp orders collection
+ */
+export function getPerpOrdersCollection(): Collection<PerpOrder> {
+  return getDB().collection<PerpOrder>("perpOrders");
+}
+
+/**
+ * Executed perp trade: one record per intent when batch executes.
+ * Used for trade history and position history.
+ */
+export interface PerpTrade {
+  privyUserId: string;
+  walletAddress: string;
+  market: string;
+  size: string;
+  isLong: boolean;
+  isOpen: boolean;
+  collateral: string;
+  leverage: string;
+  entryPrice: string | null; // from chain after execute, or null
+  txHash: string;
+  executedAt: Date;
+  poolId: string;
+  commitmentHash: string;
+}
+
+/**
+ * Get perp trades collection
+ */
+export function getPerpTradesCollection(): Collection<PerpTrade> {
+  return getDB().collection<PerpTrade>("perpTrades");
 }
 
 /**

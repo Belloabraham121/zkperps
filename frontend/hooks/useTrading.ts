@@ -1,6 +1,6 @@
 "use client";
 
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/lib/auth";
 import * as perpApi from "@/lib/api/perp";
 
@@ -49,12 +49,13 @@ export function useOpenPosition() {
       queryClient.invalidateQueries({ queryKey: ["position"] });
       queryClient.invalidateQueries({ queryKey: ["collateral"] });
       queryClient.invalidateQueries({ queryKey: ["balances"] });
+      queryClient.invalidateQueries({ queryKey: ["perp-orders"] });
     },
   });
 }
 
 /**
- * Hook to execute a batch of perp reveals
+ * Hook to execute a batch of perp reveals (with explicit commitment hashes).
  */
 export function useExecuteBatch() {
   const { token } = useAuth();
@@ -79,10 +80,37 @@ export function useExecuteBatch() {
       );
     },
     onSuccess: () => {
-      // Invalidate queries after batch execution
       queryClient.invalidateQueries({ queryKey: ["position"] });
       queryClient.invalidateQueries({ queryKey: ["collateral"] });
       queryClient.invalidateQueries({ queryKey: ["batch-state"] });
+      queryClient.invalidateQueries({ queryKey: ["perp-orders"] });
+      queryClient.invalidateQueries({ queryKey: ["perp-trade-history"] });
+      queryClient.invalidateQueries({ queryKey: ["perp-position-history"] });
+    },
+  });
+}
+
+/**
+ * Hook to execute the current pending batch (one-click, no body).
+ * Uses pending reveals from DB. Fails if fewer than 2 pending or batch interval not met.
+ */
+export function useExecuteBatchNow() {
+  const { token } = useAuth();
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async () => {
+      if (!token) throw new Error("Not authenticated");
+      return perpApi.executeBatchNow(token);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["position"] });
+      queryClient.invalidateQueries({ queryKey: ["collateral"] });
+      queryClient.invalidateQueries({ queryKey: ["batch-state"] });
+      queryClient.invalidateQueries({ queryKey: ["pending-batch"] });
+      queryClient.invalidateQueries({ queryKey: ["perp-orders"] });
+      queryClient.invalidateQueries({ queryKey: ["perp-trade-history"] });
+      queryClient.invalidateQueries({ queryKey: ["perp-position-history"] });
     },
   });
 }
@@ -117,5 +145,22 @@ export function useBatchInterval() {
       return perpApi.getBatchInterval(token);
     },
     enabled: isAuthenticated && !!token,
+  });
+}
+
+/**
+ * Hook to get pending batch (for execute page).
+ */
+export function usePendingBatch() {
+  const { token, isAuthenticated } = useAuth();
+
+  return useQuery({
+    queryKey: ["pending-batch"],
+    queryFn: () => {
+      if (!token) throw new Error("Not authenticated");
+      return perpApi.getPendingBatch(token);
+    },
+    enabled: isAuthenticated && !!token,
+    refetchInterval: 5000,
   });
 }

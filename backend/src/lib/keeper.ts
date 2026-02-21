@@ -5,8 +5,8 @@
  */
 import { decodeErrorResult } from "viem";
 import { config } from "../config.js";
-import { getPendingPerpRevealsCollection } from "./db.js";
-import { buildPoolKey, computePoolId, encodeRevealAndBatchExecutePerps, contractAddresses, type PoolKey } from "./contracts.js";
+import { getPendingPerpRevealsCollection, getPerpOrdersCollection } from "./db.js";
+import { buildPoolKey, computePoolId, encodeRevealAndBatchExecutePerps, encodeErc20Transfer, contractAddresses, type PoolKey } from "./contracts.js";
 import { getBatchState, getBatchInterval, getPublicClient, getTokenBalance, getPoolSlot0SqrtPriceX96, getPoolLiquidity, getHookPoolManager } from "./contract-reader.js";
 import { verifyWalletSetup } from "./privy.js";
 import { sendTransactionAsUser } from "./send-transaction.js";
@@ -33,6 +33,8 @@ const BATCH_REVERT_ERRORS_ABI = [
 
 export interface WalletSetupForBatch {
   walletId: string;
+  /** Optional; used for Hook funding balance check. */
+  walletAddress?: string;
 }
 
 /**
@@ -165,6 +167,45 @@ export async function tryExecuteBatchIfReady(
     }
     // #endregion
 
+    // Fund Hook with quote if needed (see scripts/zk/test-perp-e2e.js step 5.6) — quoteToken already set above
+    const oneEther = 10n ** 18n;
+    const fundingPriceEstimate18d = 2500n * oneEther;
+    const bufferMultiplier = 10n;
+    const quoteDecMultiplier = 10n ** 6n;
+
+    let totalBaseSize = 0n;
+    try {
+      const pendingOrders = await getPerpOrdersCollection()
+        .find({ commitmentHash: { $in: commitmentHashes }, status: "pending" })
+        .toArray();
+      for (const o of pendingOrders) {
+        totalBaseSize += BigInt(o.size);
+      }
+    } catch (_) {}
+
+    const hookQuoteNeeded =
+      totalBaseSize > 0n
+        ? (totalBaseSize * fundingPriceEstimate18d * bufferMultiplier * quoteDecMultiplier) / (oneEther * oneEther)
+        : 0n;
+
+    if (hookQuoteNeeded > 0n) {
+      const hookQuoteBalance = await getTokenBalance(quoteToken as `0x${string}`, contractAddresses.privBatchHook);
+      if (hookQuoteBalance < hookQuoteNeeded && walletSetup.walletAddress) {
+        const toTransfer = hookQuoteNeeded - hookQuoteBalance;
+        const userBalance = await getTokenBalance(quoteToken as `0x${string}`, walletSetup.walletAddress as `0x${string}`);
+        if (userBalance >= toTransfer) {
+          const transferData = encodeErc20Transfer(contractAddresses.privBatchHook, toTransfer);
+          await sendTransactionAsUser(walletSetup.walletId, {
+            to: quoteToken as `0x${string}`,
+            data: transferData,
+          });
+          console.log("[Perp] Batch%s: funded Hook with %s quote", label, toTransfer.toString());
+        } else {
+          console.warn("[Perp] Batch%s: Hook needs %s quote, keeper wallet has %s — skip funding; execute may revert", label, toTransfer.toString(), userBalance.toString());
+        }
+      }
+    }
+
     const data = encodeRevealAndBatchExecutePerps(
       poolKey,
       commitmentHashes as `0x${string}`[],
@@ -264,7 +305,10 @@ async function runOnce(): Promise<void> {
     if (!walletSetup.isSetup || !walletSetup.walletId) {
       return; // log only occasionally to avoid spam
     }
-    await tryExecuteBatchIfReady({ walletId: walletSetup.walletId }, "keeper");
+    await tryExecuteBatchIfReady(
+      { walletId: walletSetup.walletId, walletAddress: walletSetup.walletAddress },
+      "keeper",
+    );
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     console.warn("[Keeper] Run error:", msg);

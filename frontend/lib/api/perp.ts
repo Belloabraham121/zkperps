@@ -52,15 +52,21 @@ async function apiRequest<T>(
 
   if (!res.ok) {
     const error = await res.json().catch(() => ({ error: "Request failed" }));
-    const errorMessage = error.error || `Request failed with status ${res.status}`;
-    
-    // Provide helpful guidance for authorization errors
+    let errorMessage = error.error || `Request failed with status ${res.status}`;
+
+    if (error.cause && typeof error.cause === "string") {
+      errorMessage += `\n\nCause: ${error.cause}`;
+    }
+    if (error.hint && typeof error.hint === "string") {
+      errorMessage += `\n\n${error.hint}`;
+    }
+
     if (errorMessage.includes("Authorization failed") || errorMessage.includes("addSigners")) {
       throw new Error(
         `${errorMessage}\n\nTo fix this:\n1. Refresh the page to retry signer setup\n2. Or ensure you're signed in with a Privy embedded wallet`
       );
     }
-    
+
     throw new Error(errorMessage);
   }
 
@@ -115,6 +121,51 @@ export interface BatchState {
   poolId: string;
   lastBatchTimestamp: string;
   commitmentCount: string;
+}
+
+/** Order status from backend */
+export type OrderStatus = "pending" | "executed" | "cancelled";
+
+/** Perp order (open order or order history entry) */
+export interface PerpOrderRecord {
+  _id?: string;
+  id?: string;
+  privyUserId: string;
+  walletAddress: string;
+  poolId: string;
+  commitmentHash: string;
+  market: string;
+  size: string;
+  isLong: boolean;
+  isOpen: boolean;
+  collateral: string;
+  leverage: string;
+  nonce: string;
+  deadline: string;
+  status: OrderStatus;
+  createdAt: string;
+  updatedAt: string;
+  executedAt?: string;
+  txHash?: string;
+}
+
+/** Executed perp trade (trade history entry) */
+export interface PerpTradeRecord {
+  _id?: string;
+  id?: string;
+  privyUserId: string;
+  walletAddress: string;
+  market: string;
+  size: string;
+  isLong: boolean;
+  isOpen: boolean;
+  collateral: string;
+  leverage: string;
+  entryPrice: string | null;
+  txHash: string;
+  executedAt: string;
+  poolId: string;
+  commitmentHash: string;
 }
 
 /** Lock: normalize intent so size is always positive magnitude (contract uint256); isLong gives direction. */
@@ -181,7 +232,8 @@ export async function submitReveal(
 }
 
 /**
- * Execute a batch of perp reveals
+ * Execute a batch of perp reveals (with optional commitment hashes in body).
+ * If commitmentHashes omitted, backend uses pending reveals from DB.
  */
 export async function executeBatch(
   commitmentHashes: string[],
@@ -199,6 +251,21 @@ export async function executeBatch(
         baseIsCurrency0,
       }),
     },
+    token
+  );
+}
+
+/**
+ * Execute the current pending batch (no body).
+ * Uses pending reveals from DB for the default pool. Fails if fewer than 2 pending or batch interval not met.
+ */
+export async function executeBatchNow(token: string): Promise<{
+  hash: string;
+  batchSize: number;
+}> {
+  return apiRequest<{ hash: string; batchSize: number }>(
+    "/api/perp/execute",
+    { method: "POST" },
     token
   );
 }
@@ -301,6 +368,31 @@ export async function getBatchInterval(
   );
 }
 
+/** Pending batch state (for execute page) */
+export interface PendingBatchState {
+  poolId: string;
+  commitmentHashes: string[];
+  count: number;
+  canExecute: boolean;
+  nextExecutionAt: string | null;
+  lastBatchTimestamp: string;
+  batchIntervalSeconds: number;
+  minCommitments: number;
+}
+
+/**
+ * Get pending batch (commitments waiting to be executed).
+ */
+export async function getPendingBatch(
+  token: string
+): Promise<PendingBatchState> {
+  return apiRequest<PendingBatchState>(
+    "/api/perp/pending-batch",
+    { method: "GET" },
+    token
+  );
+}
+
 /**
  * Clear pending perp reveals for the (default) pool from the backend DB.
  * Use when the current pending batch has bad reveals and you want to stop retries and start fresh.
@@ -315,6 +407,54 @@ export async function clearPendingBatch(
       method: "POST",
       body: JSON.stringify(poolId != null ? { poolId } : {}),
     },
+    token
+  );
+}
+
+/**
+ * Get orders for the authenticated user.
+ * @param status "pending" (open orders), "executed", "cancelled", or "all"
+ */
+export async function getOrders(
+  token: string,
+  status: "pending" | "executed" | "cancelled" | "all" = "pending"
+): Promise<{ orders: PerpOrderRecord[] }> {
+  const query = status ? `?status=${status}` : "";
+  return apiRequest<{ orders: PerpOrderRecord[] }>(
+    `/api/perp/orders${query}`,
+    { method: "GET" },
+    token
+  );
+}
+
+/**
+ * Get executed trade history for the authenticated user.
+ */
+export async function getTradeHistory(
+  token: string,
+  limit: number = 50
+): Promise<{ trades: PerpTradeRecord[] }> {
+  return apiRequest<{ trades: PerpTradeRecord[] }>(
+    `/api/perp/trade-history?limit=${Math.min(Math.max(limit, 1), 200)}`,
+    { method: "GET" },
+    token
+  );
+}
+
+/**
+ * Get position history (trades that opened/closed positions), optionally filtered by market.
+ */
+export async function getPositionHistory(
+  token: string,
+  options?: { marketId?: string; limit?: number }
+): Promise<{ trades: PerpTradeRecord[] }> {
+  const params = new URLSearchParams();
+  if (options?.marketId) params.set("marketId", options.marketId);
+  if (options?.limit != null) params.set("limit", String(Math.min(Math.max(options.limit, 1), 200)));
+  const query = params.toString() ? `?${params.toString()}` : "";
+  return apiRequest<{ trades: PerpTradeRecord[] }>(
+    `/api/perp/position-history${query}`,
+    { method: "GET" },
     token
   );
 }
